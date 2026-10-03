@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Callback result</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+    img { max-width: 100%; border: 1px solid #ccc; border-radius: 4px; }
+    .error { color: #b00020; }
+    .meta { color: #555; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Callback result</h1>
+
+  {% if error %}
+  <p class="error">{{ error }}</p>
+  {% if image_url %}
+  <p class="meta">Image URL: <code>{{ image_url }}</code></p>
+  {% endif %}
+  {% else %}
+  <p>Downloaded via <code>POST /api/image</code> and saved to:</p>
+  <p class="meta"><code>{{ saved_path }}</code></p>
+  <p><img src="{{ url_for('serve_file', token=token) }}" alt="Recalled image"></p>
+  {% endif %}
+
+  <p><a href="{{ url_for('index') }}">Back</a></p>
+</body>
+</html>

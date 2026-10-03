@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Returning…</title>
+</head>
+<body>
+  <p>Returning selected image to caller…</p>
+  <form id="postback" method="post" action="{{ callback }}">
+    <input type="hidden" name="image_url" value="{{ image_url }}">
+  </form>
+  <script>document.getElementById('postback').submit();</script>
+</body>
+</html>

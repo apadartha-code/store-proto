@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Recall by nickname — Image Store{% endblock %}
+{% block content %}
+<section class="recall">
+  <h1>Find image by nickname</h1>
+  <p>
+    <a href="{{ url_for('web.landing') }}" target="_blank" rel="noopener noreferrer" data-testid="recall-setup-nicknames">
+      Setup nicknames for recalling image
+    </a>
+    <span class="hint">(opens gallery in a new tab)</span>
+  </p>
+
+  <form method="post" action="{{ url_for('web.recall_find') }}">
+    <input type="hidden" name="recall_mode" value="{{ recall_mode }}">
+    {% if recall_mode == 'callback' %}
+    <input type="hidden" name="callback" value="{{ callback }}">
+    {% else %}
+    <input type="hidden" name="redir" value="{{ redir }}">
+    <input type="hidden" name="idhash" value="{{ idhash }}">
+    {% endif %}
+    <label>Nickname (text or 32-char MD5 hex)
+      <input type="text" name="nickname" value="{{ nickname or '' }}" required>
+    </label>
+    <button type="submit" data-testid="recall-find">Find nearest match</button>
+  </form>
+
+  {% if error %}
+  <p class="error">{{ error }}</p>
+  {% endif %}
+
+  {% if image %}
+  <div class="recall-result">
+    <h2>Nearest match</h2>
+    <a href="#" class="thumb large" id="thumb-link">
+      <img src="{{ url_for('web.serve_thumbnail', image_id=image.id) }}" alt="{{ image.original_name }}">
+    </a>
+    <p>{{ image.original_name }} — <a href="{{ url_for('web.image_detail', image_id=image.id) }}">Metadata</a></p>
+
+    <div id="full-preview" class="full-preview hidden">
+      <img src="{{ url_for('web.serve_image_bytes', image_id=image.id) }}" alt="Full image">
+    </div>
+    <p><button type="button" id="toggle-full">Show full image on this page</button></p>
+
+    {% if show_done %}
+    <form method="post" action="{{ url_for('web.recall_done') }}" id="done-form">
+      <input type="hidden" name="recall_mode" value="{{ recall_mode }}">
+      {% if recall_mode == 'callback' %}
+      <input type="hidden" name="callback" value="{{ callback }}">
+      {% else %}
+      <input type="hidden" name="redir" value="{{ redir }}">
+      <input type="hidden" name="idhash" value="{{ idhash }}">
+      {% endif %}
+      <input type="hidden" name="image_url" value="{{ image_url }}">
+      <button type="submit" class="primary" data-testid="recall-done">Done</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+<script>
+const btn = document.getElementById('toggle-full');
+const preview = document.getElementById('full-preview');
+const thumb = document.getElementById('thumb-link');
+function toggleFull(e) {
+  if (e) e.preventDefault();
+  preview.classList.toggle('hidden');
+  if (btn) {
+    btn.textContent = preview.classList.contains('hidden')
+      ? 'Show full image on this page'
+      : 'Hide full image';
+  }
+}
+if (btn && preview) btn.addEventListener('click', toggleFull);
+if (thumb && preview) thumb.addEventListener('click', toggleFull);
+</script>
+{% endblock %}

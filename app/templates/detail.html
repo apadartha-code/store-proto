@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ image.original_name }} — Image Store{% endblock %}
+{% block content %}
+<article class="detail">
+  <img class="full" src="{{ url_for('web.serve_image_bytes', image_id=image.id) }}" alt="{{ image.original_name }}">
+  <section class="meta">
+    <h1>{{ image.original_name }}</h1>
+    <dl>
+      <dt>ID</dt><dd><code>{{ image.id }}</code></dd>
+      <dt>Uploaded</dt><dd>{{ image.upload_time }}</dd>
+      <dt>MIME</dt><dd>{{ image.mime_type }}</dd>
+      <dt>Size</dt><dd>{{ image.image_size }} bytes</dd>
+      <dt>Sharing</dt><dd>{{ image.sharing }}</dd>
+      <dt>Category</dt><dd>{{ image.category }}</dd>
+      <dt>Source</dt><dd>{{ image.source or '—' }}</dd>
+      <dt>License</dt><dd>{{ image.license or '—' }}</dd>
+      <dt>Tags</dt><dd>{{ image.tags | join(', ') if image.tags else '—' }}</dd>
+      <dt>Nicknames</dt><dd>{% for n in nicknames %}<code>{{ n }}</code> {% else %}—{% endfor %}</dd>
+      <dt>Image URL</dt><dd><a href="{{ image_page_url }}">{{ image_page_url }}</a></dd>
+    </dl>
+
+    <form id="update-form" class="update-form">
+      <h2>Update tags &amp; nicknames</h2>
+      <label>Tags (comma-separated)
+        <input type="text" name="tags" value="{{ image.tags | join(', ') }}">
+      </label>
+      <label>Add nickname (plain text; stored as MD5 hex)
+        <input type="text" name="nickname" placeholder="optional new nickname">
+      </label>
+      <button type="submit" data-testid="detail-save">Save</button>
+      <p id="update-status"></p>
+    </form>
+    <p><a href="{{ url_for('web.landing') }}">← Back to gallery</a></p>
+  </section>
+</article>
+<script>
+document.getElementById('update-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const tags = fd.get('tags').split(',').map(t => t.trim()).filter(Boolean);
+  const body = { tags };
+  const nick = fd.get('nickname');
+  if (nick) body.nickname = nick;
+  const res = await fetch('/api/images/{{ image.id }}', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const status = document.getElementById('update-status');
+  if (!res.ok) {
+    const data = await res.json();
+    status.textContent = data.error || 'Update failed';
+    return;
+  }
+  status.textContent = 'Saved. Reloading…';
+  location.reload();
+});
+</script>
+{% endblock %}

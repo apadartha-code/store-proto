@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %}Gallery — Image Store{% endblock %}
+
+{% block header_actions %}
+<button type="button" class="header-btn" id="upload-open" data-testid="upload-open">Upload images</button>
+{% endblock %}
+
+{% macro query_suffix() %}category={{ category }}&sharing={{ sharing }}{% if q %}&q={{ q | urlencode }}{% endif %}{% if random_mode %}&random=1{% endif %}{% endmacro %}
+
+{% macro pager_controls() %}
+<div class="pager">
+  {% if pager.page > 1 %}
+  <a href="?page={{ pager.page - 1 }}&{{ query_suffix() }}">Previous</a>
+  {% endif %}
+  <label>Page
+    <select onchange="location.href=this.value">
+      {% for p in range(1, pager.pages + 1) %}
+      <option value="?page={{ p }}&{{ query_suffix() }}" {% if p == pager.page %}selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <span>{{ pager.page }} / {{ pager.pages }}</span>
+  {% if pager.page < pager.pages %}
+  <a href="?page={{ pager.page + 1 }}&{{ query_suffix() }}">Next</a>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% block content %}
+<section class="gallery-controls">
+  <form class="search-bar" method="get" action="{{ url_for('web.landing') }}" id="gallery-search-form">
+    <input type="hidden" name="page" value="1">
+    <input type="hidden" name="category" id="form-category" value="{{ category }}">
+    <input type="hidden" name="sharing" id="form-sharing" value="{{ sharing }}">
+
+    <div class="search-row">
+      <input
+        type="search"
+        name="q"
+        id="search-q"
+        class="search-input"
+        placeholder="Search names, tags, category, sharing…"
+        value="{{ q }}"
+        autocomplete="off"
+      >
+      <button type="submit" class="primary" data-testid="search-submit">Search</button>
+      <button type="button" class="icon-btn" id="settings-toggle" data-testid="settings-toggle" aria-expanded="false" aria-controls="settings-panel" title="Gallery settings">
+        <span aria-hidden="true">⚙</span>
+      </button>
+    </div>
+
+    <div id="settings-panel" class="settings-panel" hidden>
+      <p class="hint">Filters apply to latest, search, and random views for this browser session.</p>
+      <div class="settings-fields">
+        <label>Category
+          <select id="settings-category">
+            <option value="general" {% if category == 'general' %}selected{% endif %}>General</option>
+            <option value="adult" {% if category == 'adult' %}selected{% endif %}>Adult</option>
+            <option value="violent" {% if category == 'violent' %}selected{% endif %}>Violent</option>
+            <option value="all" {% if category == 'all' %}selected{% endif %}>All</option>
+          </select>
+        </label>
+        <label>Sharing
+          <select id="settings-sharing">
+            <option value="public" {% if sharing == 'public' %}selected{% endif %}>Public</option>
+            <option value="shared" {% if sharing == 'shared' %}selected{% endif %}>Shared</option>
+            <option value="private" {% if sharing == 'private' %}selected{% endif %}>Private</option>
+            <option value="all" {% if sharing == 'all' %}selected{% endif %}>All</option>
+          </select>
+        </label>
+        <button type="button" id="settings-apply" data-testid="settings-apply">Apply filters</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="view-modes">
+    <a class="mode-link {% if not random_mode and not search_mode %}active{% endif %}" href="?page=1&category={{ category }}&sharing={{ sharing }}" id="mode-latest" data-testid="mode-latest">Latest</a>
+    <a class="mode-link {% if random_mode %}active{% endif %}" href="?page=1&random=1&category={{ category }}&sharing={{ sharing }}" id="mode-random" data-testid="mode-random">Random</a>
+  </div>
+
+  <p class="view-caption">
+    {% if search_mode %}
+    Search results for “{{ q }}” (within category/sharing filters)
+    {% elif random_mode %}
+    Random images (within category/sharing filters)
+    {% else %}
+    Latest uploads (within category/sharing filters)
+    {% endif %}
+  </p>
+</section>
+
+{{ pager_controls() }}
+
+<section class="grid" style="--cols: 6;">
+  {% for img in images %}
+  <a class="thumb" href="{{ url_for('web.image_detail', image_id=img.id) }}">
+    <img src="{{ url_for('web.serve_thumbnail', image_id=img.id) }}" alt="{{ img.original_name }}" loading="lazy">
+    <span class="caption">{{ img.original_name }}</span>
+  </a>
+  {% else %}
+  <p class="empty">No images match this view. Try another search or adjust settings.</p>
+  {% endfor %}
+</section>
+
+{{ pager_controls() }}
+
+<dialog id="upload-dialog">
+  <form method="post" action="/api/upload" enctype="multipart/form-data" id="upload-form">
+    <h2>Upload images</h2>
+    <p class="hint">Collection upload: select multiple files; metadata applies to all.</p>
+    <label>Files <input type="file" name="files" multiple required accept="image/*"></label>
+    <label>Sharing
+      <select name="sharing" id="sharing-select">
+        <option value="public">Public</option>
+        <option value="shared">Shared</option>
+        <option value="private">Private</option>
+      </select>
+    </label>
+    <label>Category
+      <select name="category">
+        <option value="general">General</option>
+        <option value="adult">Adult</option>
+        <option value="violent">Violent</option>
+      </select>
+    </label>
+    <label>Source <input type="text" name="source" id="source-field" placeholder="Required for public"></label>
+    <label>License <input type="text" name="license"></label>
+    <label>Tags <input type="text" name="tags" placeholder="optional, comma-separated"></label>
+    <div class="dialog-actions">
+      <button type="submit" data-testid="upload-submit">Upload</button>
+      <button type="button" id="upload-close" data-testid="upload-close">Cancel</button>
+    </div>
+    <p id="upload-status"></p>
+    <div id="upload-errors" class="upload-errors" hidden></div>
+  </form>
+</dialog>
+
+<script>
+const FILTER_STORAGE_KEY = 'imageStore.galleryFilters';
+
+function loadStoredFilters() {
+  try {
+    return JSON.parse(sessionStorage.getItem(FILTER_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredFilters(category, sharing) {
+  sessionStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ category, sharing }));
+}
+
+(function applyStoredFiltersOnLoad() {
+  const params = new URLSearchParams(window.location.search);
+  const stored = loadStoredFilters();
+  let changed = false;
+  if (!params.has('category') && stored.category) {
+    params.set('category', stored.category);
+    changed = true;
+  }
+  if (!params.has('sharing') && stored.sharing) {
+    params.set('sharing', stored.sharing);
+    changed = true;
+  }
+  if (changed) {
+    window.location.replace(`${window.location.pathname}?${params.toString()}`);
+  } else if (params.has('category') && params.has('sharing')) {
+    saveStoredFilters(params.get('category'), params.get('sharing'));
+  }
+})();
+
+const settingsToggle = document.getElementById('settings-toggle');
+const settingsPanel = document.getElementById('settings-panel');
+settingsToggle.addEventListener('click', () => {
+  const open = settingsPanel.hidden;
+  settingsPanel.hidden = !open;
+  settingsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+});
+
+document.getElementById('settings-apply').addEventListener('click', () => {
+  const category = document.getElementById('settings-category').value;
+  const sharing = document.getElementById('settings-sharing').value;
+  saveStoredFilters(category, sharing);
+  document.getElementById('form-category').value = category;
+  document.getElementById('form-sharing').value = sharing;
+  const params = new URLSearchParams(window.location.search);
+  params.set('category', category);
+  params.set('sharing', sharing);
+  params.set('page', '1');
+  window.location.href = `?${params.toString()}`;
+});
+
+function syncModeLinks() {
+  const params = new URLSearchParams(window.location.search);
+  const category = params.get('category') || 'general';
+  const sharing = params.get('sharing') || 'public';
+  const q = params.get('q') || '';
+  const latest = document.getElementById('mode-latest');
+  const random = document.getElementById('mode-random');
+  latest.href = `?page=1&category=${encodeURIComponent(category)}&sharing=${encodeURIComponent(sharing)}`;
+  random.href = `?page=1&random=1&category=${encodeURIComponent(category)}&sharing=${encodeURIComponent(sharing)}`;
+  if (q) {
+    latest.href += `&q=${encodeURIComponent(q)}`;
+  }
+}
+syncModeLinks();
+
+const dialog = document.getElementById('upload-dialog');
+document.getElementById('upload-open').onclick = () => {
+  document.getElementById('upload-status').textContent = '';
+  document.getElementById('upload-errors').hidden = true;
+  document.getElementById('upload-errors').replaceChildren();
+  dialog.showModal();
+};
+document.getElementById('upload-close').onclick = () => dialog.close();
+const sharing = document.getElementById('sharing-select');
+const source = document.getElementById('source-field');
+function syncSource() {
+  source.required = sharing.value === 'public';
+  source.disabled = sharing.value === 'private';
+  if (sharing.value === 'private') source.value = '';
+}
+sharing.addEventListener('change', syncSource);
+syncSource();
+
+function collectUploadErrors(data) {
+  if (Array.isArray(data.details)) return data.details;
+  if (Array.isArray(data.errors)) return data.errors;
+  return [];
+}
+
+function renderUploadFailures(failures) {
+  const box = document.getElementById('upload-errors');
+  box.replaceChildren();
+  if (!failures.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const intro = document.createElement('p');
+  intro.className = 'upload-errors-intro';
+  intro.textContent =
+    'These files could not be uploaded. Check the server logs for full details.';
+  box.appendChild(intro);
+  const list = document.createElement('ul');
+  list.className = 'upload-failures-list';
+  for (const item of failures) {
+    const li = document.createElement('li');
+    const name = item.file || '(unknown file)';
+    const reason = item.error || 'Unknown error';
+    li.textContent = name + ': ' + reason;
+    list.appendChild(li);
+  }
+  box.appendChild(list);
+}
+
+document.getElementById('upload-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const status = document.getElementById('upload-status');
+  status.textContent = 'Uploading…';
+  renderUploadFailures([]);
+  const fd = new FormData(e.target);
+  let data;
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    data = await res.json();
+    const failures = collectUploadErrors(data);
+    const uploaded = Array.isArray(data.image_ids) ? data.image_ids.length : 0;
+
+    if (!res.ok) {
+      status.textContent = data.error || 'Upload failed';
+      renderUploadFailures(failures);
+      return;
+    }
+
+    if (failures.length === 0) {
+      status.textContent = 'Uploaded ' + uploaded + ' image(s). Reloading…';
+      location.reload();
+      return;
+    }
+
+    if (uploaded > 0) {
+      status.textContent =
+        'Uploaded ' + uploaded + ' image(s). Some files failed (see below).';
+    } else {
+      status.textContent = 'No files were uploaded.';
+    }
+    renderUploadFailures(failures);
+  } catch (err) {
+    status.textContent = 'Upload request failed. Check the server logs.';
+    renderUploadFailures([]);
+  }
+});
+</script>
+{% endblock %}

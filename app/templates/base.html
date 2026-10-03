@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Image Store{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <a href="{{ url_for('web.landing') }}" class="logo">Image Store</a>
+    <nav class="site-nav">
+      {% block header_actions %}{% endblock %}
+      <a href="{{ url_for('web.recall') }}">Find by nickname</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer">
+    {% block footer %}{% endblock %}
+  </footer>
+</body>
+</html>
