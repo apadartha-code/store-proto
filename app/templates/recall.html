@@ -18,30 +18,20 @@
     <input type="hidden" name="redir" value="{{ redir }}">
     <input type="hidden" name="idhash" value="{{ idhash }}">
     {% endif %}
-    <label>Nickname (text or 32-char MD5 hex)
+    <label>Nickname (text or 6-char hex; nearest hash if no exact match)
       <input type="text" name="nickname" value="{{ nickname or '' }}" required>
     </label>
-    <button type="submit" data-testid="recall-find">Find nearest match</button>
+    <button type="submit" data-testid="recall-find">Find matching images</button>
   </form>
 
   {% if error %}
   <p class="error">{{ error }}</p>
   {% endif %}
 
-  {% if image %}
+  {% if matches %}
   <div class="recall-result">
-    <h2>Nearest match</h2>
-    <a href="#" class="thumb large" id="thumb-link">
-      <img src="{{ url_for('web.serve_thumbnail', image_id=image.id) }}" alt="{{ image.original_name }}">
-    </a>
-    <p>{{ image.original_name }} — <a href="{{ url_for('web.image_detail', image_id=image.id) }}">Metadata</a></p>
-
-    <div id="full-preview" class="full-preview hidden">
-      <img src="{{ url_for('web.serve_image_bytes', image_id=image.id) }}" alt="Full image">
-    </div>
-    <p><button type="button" id="toggle-full">Show full image on this page</button></p>
-
-    {% if show_done %}
+    <h2>Matching images ({{ matches|length }})</h2>
+    <p class="hint">Select at least one image, then press Done.</p>
     <form method="post" action="{{ url_for('web.recall_done') }}" id="done-form">
       <input type="hidden" name="recall_mode" value="{{ recall_mode }}">
       {% if recall_mode == 'callback' %}
@@ -50,27 +40,32 @@
       <input type="hidden" name="redir" value="{{ redir }}">
       <input type="hidden" name="idhash" value="{{ idhash }}">
       {% endif %}
-      <input type="hidden" name="image_url" value="{{ image_url }}">
-      <button type="submit" class="primary" data-testid="recall-done">Done</button>
+      <ul class="recall-match-list">
+        {% for m in matches %}
+        <li>
+          <label class="recall-match-item">
+            <input type="checkbox" name="image_urls" value="{{ m.image_url }}" class="recall-select" data-testid="recall-select-image">
+            <img src="{{ url_for('web.serve_thumbnail', image_id=m.image.id) }}" alt="">
+            <span>{{ m.image.original_name }}</span>
+          </label>
+          <a href="{{ url_for('web.serve_image_bytes', image_id=m.image.id) }}" target="_blank" rel="noopener">Full</a>
+        </li>
+        {% endfor %}
+      </ul>
+      <button type="submit" class="primary" id="recall-done" data-testid="recall-done" disabled>Done</button>
     </form>
-    {% endif %}
   </div>
   {% endif %}
 </section>
 <script>
-const btn = document.getElementById('toggle-full');
-const preview = document.getElementById('full-preview');
-const thumb = document.getElementById('thumb-link');
-function toggleFull(e) {
-  if (e) e.preventDefault();
-  preview.classList.toggle('hidden');
-  if (btn) {
-    btn.textContent = preview.classList.contains('hidden')
-      ? 'Show full image on this page'
-      : 'Hide full image';
-  }
+const boxes = document.querySelectorAll('.recall-select');
+const doneBtn = document.getElementById('recall-done');
+function syncDone() {
+  if (!doneBtn) return;
+  const any = [...boxes].some((b) => b.checked);
+  doneBtn.disabled = !any;
 }
-if (btn && preview) btn.addEventListener('click', toggleFull);
-if (thumb && preview) thumb.addEventListener('click', toggleFull);
+boxes.forEach((b) => b.addEventListener('change', syncDone));
+syncDone();
 </script>
 {% endblock %}

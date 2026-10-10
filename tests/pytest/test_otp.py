@@ -1,4 +1,4 @@
-"""Features.md §5 Nickname recall — OTP / idhash."""
+"""Features.md §7–§8 — OTP / idhash for image download."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from app.services.otp import (
 
 
 def test_idhash_and_match():
-    # Features.md §5 — idhash = base64(md5(id bytes))
+    # Features.md §7 — idhash = base64(md5(id bytes))
     id_bytes = secrets.token_bytes(20)
     id_b64 = base64.b64encode(id_bytes).decode("ascii")
     idhash = idhash_for_id_bytes(id_bytes)
@@ -23,7 +23,7 @@ def test_idhash_and_match():
 
 
 def test_otp_single_use_and_url():
-    # Features.md §5–§6 — OTP consumed; image URL resolved
+    # Features.md §7–§8 — OTP consumed; image URL resolved
     id_bytes = b"client-secret-id"
     idhash = idhash_for_id_bytes(id_bytes)
     id_b64 = base64.b64encode(id_bytes).decode("ascii")

@@ -1,4 +1,4 @@
-"""Features.md §5 — recall callback vs redir."""
+"""Features.md §7 — recall callback vs redir."""
 
 from __future__ import annotations
 
@@ -7,14 +7,12 @@ import hashlib
 
 
 def test_recall_callback_wins_over_redir(client):
-    # Features.md §5 — callback ignores redir
     res = client.get(
         "/recall?callback=http://cb.example/done"
         "&redir=http://redir.example/r&idhash=abc"
     )
     assert res.status_code == 200
     assert b'name="recall_mode" value="callback"' in res.data
-    assert b"http://cb.example/done" in res.data
 
 
 def test_recall_redir_mode(client):

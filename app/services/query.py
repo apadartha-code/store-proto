@@ -6,6 +6,7 @@ import re
 from typing import Any, Optional
 
 from app.db import db_session, row_to_image
+from app.services.dictionary import get_dictionary
 
 WEIGHT_TAGS = 4.0
 WEIGHT_NAME = 2.0
@@ -15,6 +16,14 @@ WEIGHT_SHARING = 1.0
 _TERM_SPLIT = re.compile(r"\s+")
 
 
+def _resolve_category_key(category: str) -> Optional[str]:
+    dd = get_dictionary()
+    for ck in dd.category_keys():
+        if ck.lower() == category.lower():
+            return ck
+    return None
+
+
 def _build_filters(
     category: Optional[str],
     sharing: Optional[str],
@@ -22,12 +31,27 @@ def _build_filters(
     clauses = ["1=1"]
     params: list[Any] = []
 
-    if category:
-        clauses.append("category = ?")
-        params.append(category.lower())
+    if category and category.lower() != "all":
+        cat_key = _resolve_category_key(category)
+        if cat_key:
+            cat = get_dictionary().category_by_key(cat_key)
+            if cat:
+                clauses.append(
+                    "images.id IN (SELECT image_id FROM image_categories WHERE category_id = ?)"
+                )
+                params.append(cat.id)
+            else:
+                clauses.append("1=0")
+        else:
+            clauses.append("1=0")
+
     if sharing:
-        clauses.append("sharing = ?")
-        params.append(sharing.lower())
+        s = sharing.lower()
+        if s == "public_and_shared":
+            clauses.append("images.sharing IN ('public', 'shared')")
+        elif s != "all":
+            clauses.append("images.sharing = ?")
+            params.append(s)
 
     return " AND ".join(clauses), params
 
@@ -60,7 +84,7 @@ def fuzzy_score(query: str, image: dict[str, Any]) -> float:
 
     tags_text = " ".join(image.get("tags") or [])
     name = image.get("original_name") or ""
-    category = image.get("category") or ""
+    categories_text = " ".join(image.get("categories") or [])
     sharing = image.get("sharing") or ""
 
     score = 0.0
@@ -69,7 +93,7 @@ def fuzzy_score(query: str, image: dict[str, Any]) -> float:
             score += WEIGHT_TAGS
         if _term_matches_fuzzy(term, name):
             score += WEIGHT_NAME
-        if _term_matches_fuzzy(term, category):
+        if _term_matches_fuzzy(term, categories_text):
             score += WEIGHT_CATEGORY
         if _term_matches_fuzzy(term, sharing):
             score += WEIGHT_SHARING
@@ -95,7 +119,7 @@ def list_images(
     page: int = 1,
     per_page: int = 60,
     category: Optional[str] = "general",
-    sharing: Optional[str] = "public",
+    sharing: Optional[str] = "public_and_shared",
     tags: Optional[list[str]] = None,
     q: Optional[str] = None,
     order: str = "recent",
@@ -107,10 +131,10 @@ def list_images(
     with db_session() as conn:
         if search_q and order != "random":
             rows = conn.execute(
-                f"SELECT * FROM images WHERE {where}",
+                f"SELECT images.* FROM images WHERE {where}",
                 params,
             ).fetchall()
-            images = [row_to_image(r) for r in rows]
+            images = [row_to_image(r, conn) for r in rows]
             if tags:
                 tag_set = {t.lower() for t in tags}
                 images = [
@@ -130,7 +154,7 @@ def list_images(
         order_sql = "RANDOM()" if order == "random" else "upload_time DESC"
         if tags:
             for tag in tags:
-                where += ' AND tags LIKE ?'
+                where += " AND images.tags LIKE ?"
                 params.append(f'%"{tag}"%')
 
         total = conn.execute(
@@ -139,16 +163,17 @@ def list_images(
         offset = (page - 1) * per_page
         rows = conn.execute(
             f"""
-            SELECT * FROM images
+            SELECT images.* FROM images
             WHERE {where}
             ORDER BY {order_sql}
             LIMIT ? OFFSET ?
             """,
             [*params, per_page, offset],
         ).fetchall()
+        items = [row_to_image(r, conn) for r in rows]
 
     return {
-        "items": [row_to_image(r) for r in rows],
+        "items": items,
         "page": page,
         "per_page": per_page,
         "total": total,
@@ -159,13 +184,13 @@ def list_images(
 def get_image(image_id: str) -> Optional[dict[str, Any]]:
     with db_session() as conn:
         row = conn.execute("SELECT * FROM images WHERE id = ?", (image_id,)).fetchone()
-    return row_to_image(row) if row else None
+        return row_to_image(row, conn) if row else None
 
 
 def random_images(
     limit: int = 60,
     category: Optional[str] = "general",
-    sharing: Optional[str] = "public",
+    sharing: Optional[str] = "public_and_shared",
 ) -> list[dict[str, Any]]:
     result = list_images(
         page=1,

@@ -15,7 +15,11 @@ import urllib.parse
 from app.config import Config
 from app.services.otp import create_otp
 from app.services.fragments import reconstruct_image
-from app.services.nickname import find_nearest_image_id, list_nicknames_for_image
+from app.services.nickname import (
+    find_images_by_nickname,
+    hash_to_display,
+    list_nickname_hashes_for_image,
+)
 from app.services.query import get_image, list_images
 from app.services.thumbnail import thumbnail_path
 
@@ -85,7 +89,7 @@ def _pager(page: int, pages: int) -> dict:
 def landing():
     page = int(request.args.get("page", 1))
     category = request.args.get("category", "general")
-    sharing = request.args.get("sharing", "public")
+    sharing = request.args.get("sharing", "public_and_shared")
     random_mode = request.args.get("random") == "1"
     q = request.args.get("q", "").strip()
     search_mode = bool(q) and not random_mode
@@ -117,11 +121,13 @@ def image_detail(image_id: str):
     img = get_image(image_id)
     if not img:
         abort(404)
-    nicknames = list_nicknames_for_image(image_id)
+    nickname_hashes = [
+        hash_to_display(h) for h in list_nickname_hashes_for_image(image_id)
+    ]
     return render_template(
         "detail.html",
         image=img,
-        nicknames=nicknames,
+        nickname_hashes=nickname_hashes,
         image_page_url=url_for("web.image_page", image_id=image_id, _external=True),
     )
 
@@ -175,22 +181,31 @@ def recall():
 def recall_find():
     ctx = _recall_context_from_form()
     nickname = request.form.get("nickname", "")
-    image_id = find_nearest_image_id(nickname)
-    if not image_id:
+    image_ids = find_images_by_nickname(nickname)
+    if not image_ids:
         return render_template(
             "recall.html",
             **ctx,
             error="No matching images in database",
             nickname=nickname,
         )
-    img = get_image(image_id)
-    image_url = url_for("web.image_page", image_id=image_id, _external=True)
+    matches = []
+    for image_id in image_ids:
+        img = get_image(image_id)
+        if img:
+            matches.append(
+                {
+                    "image": img,
+                    "image_url": url_for(
+                        "web.image_page", image_id=image_id, _external=True
+                    ),
+                }
+            )
     return render_template(
         "recall.html",
         **ctx,
         nickname=nickname,
-        image=img,
-        image_url=image_url,
+        matches=matches,
         show_done=True,
     )
 
@@ -198,8 +213,8 @@ def recall_find():
 @web_bp.post("/recall/done")
 def recall_done():
     ctx = _recall_context_from_form()
-    image_url = request.form.get("image_url")
-    if not image_url:
+    image_urls = request.form.getlist("image_urls")
+    if not image_urls:
         abort(400)
 
     if ctx["recall_mode"] == "redir":
@@ -207,7 +222,7 @@ def recall_done():
         idhash = ctx.get("idhash")
         if not redir or not idhash:
             abort(400)
-        otp = create_otp(image_url, idhash)
+        otp = create_otp(image_urls[0], idhash)
         return redirect(_append_query(redir, {"otp": otp}))
 
     callback = ctx.get("callback")
@@ -216,5 +231,5 @@ def recall_done():
     return render_template(
         "recall_done.html",
         callback=callback,
-        image_url=image_url,
+        image_urls=image_urls,
     )

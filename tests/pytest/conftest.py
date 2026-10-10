@@ -11,6 +11,9 @@ def _reload_app_package() -> None:
     for name in list(sys.modules):
         if name == "app" or name.startswith("app."):
             del sys.modules[name]
+    from app.services.dictionary import reset_dictionary_cache
+
+    reset_dictionary_cache()
 
 
 @pytest.fixture

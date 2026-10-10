@@ -1,4 +1,4 @@
-# Image Store (Phase 1)
+# Image Store (v2)
 
 LAN-hostable image gallery with fragment storage, nickname recall, and SQLite persistence.
 
@@ -46,6 +46,9 @@ Settings use **environment variables** (see `.env.example`). Load a local `.env`
 | `FRAGMENT_SIZE_KB` | `64` | Fragment chunk size |
 | `LISTEN_PORT` | `5000` | HTTP(S) port |
 | `MAX_UPLOAD_KB` | `1000` | Max upload size per image |
+| `MAX_UPLOAD_TOTAL_BYTES` | `52428800` | Max combined bytes per batch upload (50 MiB) |
+| `MAX_UPLOAD_FILE_COUNT` | `50` | Max files per batch upload |
+| `ENUMS_PATH` | `enums.yml` (repo root) | Path to category/license dictionary YAML |
 | `CERT_PATH` | (unset) | TLS certificate; HTTPS only if set |
 | `KEY_PATH` | (optional) | TLS private key |
 | `LOG_LEVEL` | `INFO` | Log level for app and HTTP access logs |
@@ -72,7 +75,7 @@ docker run --rm -p 5000:5000 \
 
 Map ports with `-p <host>:<container>` if you change `LISTEN_PORT`.
 
-Details: [Features.md §8 Logging](Features.md#8-logging) for tee/syslog examples.
+Details: [Features.md §10 Logging](Features.md#10-logging) for tee/syslog examples.
 
 ## Testing
 
@@ -96,4 +99,4 @@ STORAGE_PATH=/tmp/img-test .venv/bin/python -c "from app import create_app; crea
 
 External apps download images via `/api/image` and optional `/recall` flows (callback or redirect + OTP). Sample clients under `sample-clients/`.
 
-Full API, recall, OTP, and sample client steps: [Features.md §5–§9](Features.md#5-nickname-recall-recall).
+Full API, recall, OTP, and sample client steps: [Features.md §7–§11](Features.md#7-nickname-recall-recall).

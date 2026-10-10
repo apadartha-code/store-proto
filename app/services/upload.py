@@ -5,10 +5,13 @@ import logging
 import mimetypes
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from app.config import Config
 from app.db import db_session
+from app.services.categories import resolve_category_keys, set_image_categories
+from app.services.dictionary import get_dictionary
+from app.services.errors import UploadValidationError
 from app.services.fragments import split_into_fragments
 from app.services.nickname import add_random_default_nickname
 from app.services.thumbnail import schedule_thumbnail, thumbnail_path
@@ -16,17 +19,21 @@ from app.services.thumbnail import schedule_thumbnail, thumbnail_path
 logger = logging.getLogger(__name__)
 
 
-class UploadValidationError(ValueError):
-    pass
+def validate_batch_limits(file_count: int, total_bytes: int) -> None:
+    if file_count > Config.MAX_UPLOAD_FILE_COUNT:
+        raise UploadValidationError(
+            f"Too many files (max {Config.MAX_UPLOAD_FILE_COUNT})"
+        )
+    if total_bytes > Config.MAX_UPLOAD_TOTAL_BYTES:
+        raise UploadValidationError(
+            f"Combined upload size exceeds {Config.MAX_UPLOAD_TOTAL_BYTES} bytes"
+        )
 
 
 def _validate_metadata(meta: dict[str, Any]) -> dict[str, Any]:
     sharing = (meta.get("sharing") or "public").lower()
-    category = (meta.get("category") or "general").lower()
     if sharing not in ("public", "shared", "private"):
         raise UploadValidationError("Invalid sharing value")
-    if category not in ("general", "adult", "violent"):
-        raise UploadValidationError("Invalid category value")
 
     source = meta.get("source")
     if sharing == "public" and not source:
@@ -40,14 +47,32 @@ def _validate_metadata(meta: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(tags, list):
         raise UploadValidationError("Tags must be a list")
 
-    license_val = meta.get("license")
+    raw_categories = meta.get("categories") or meta.get("category") or ["General"]
+    if isinstance(raw_categories, str):
+        raw_categories = [c.strip() for c in raw_categories.split(",") if c.strip()]
+    category_ids = resolve_category_keys(raw_categories)
+
+    dd = get_dictionary()
+    license_key = meta.get("license") or dd.default_license_key_for_sharing(sharing)
+    lic = None
+    for lk in dd.license_keys():
+        if lk.lower() == str(license_key).lower():
+            lic = dd.license_by_key(lk)
+            break
+    if not lic:
+        raise UploadValidationError("Invalid license value")
+    if not dd.validate_license_for_sharing(lic.key, sharing):
+        raise UploadValidationError(
+            f"License {lic.key} is not valid for sharing {sharing}"
+        )
 
     return {
         "sharing": sharing,
-        "category": category,
+        "category_ids": category_ids,
         "source": source,
         "tags": tags,
-        "license": license_val,
+        "license_id": lic.id,
+        "license_key": lic.key,
     }
 
 
@@ -101,8 +126,8 @@ def ingest_image(
             """
             INSERT INTO images (
                 id, original_name, upload_time, mime_type, image_size,
-                sharing, category, tags, source, license
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sharing, tags, source, license_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 image_id,
@@ -111,12 +136,16 @@ def ingest_image(
                 mime,
                 len(raw),
                 fields["sharing"],
-                fields["category"],
                 json.dumps(fields["tags"]),
                 fields["source"],
-                fields["license"],
+                fields["license_id"],
             ),
         )
+        for cid in fields["category_ids"]:
+            conn.execute(
+                "INSERT INTO image_categories (image_id, category_id) VALUES (?, ?)",
+                (image_id, cid),
+            )
         for fragment_id, index in fragments:
             conn.execute(
                 """
@@ -133,7 +162,7 @@ def ingest_image(
     thumb = thumbnail_path(image_id)
     logger.info(
         "Ingested image original_name=%s image_id=%s mime_type=%s image_size=%s "
-        "upload_time=%s sharing=%s category=%s tags=%s source=%s license=%s "
+        "upload_time=%s sharing=%s category_ids=%s tags=%s source=%s license_id=%s "
         "fragment_count=%s thumbnail_path=%s",
         filename,
         image_id,
@@ -141,10 +170,10 @@ def ingest_image(
         len(raw),
         upload_time,
         fields["sharing"],
-        fields["category"],
+        fields["category_ids"],
         fields["tags"],
         fields["source"],
-        fields["license"],
+        fields["license_id"],
         len(fragments),
         thumb,
     )
@@ -160,4 +189,23 @@ def update_image_tags(image_id: str, tags: list[str]) -> None:
         conn.execute(
             "UPDATE images SET tags = ? WHERE id = ?",
             (json.dumps(tags), image_id),
+        )
+
+
+def update_image_license(image_id: str, license_key: str, sharing: str) -> None:
+    dd = get_dictionary()
+    lic = None
+    for lk in dd.license_keys():
+        if lk.lower() == license_key.lower():
+            lic = dd.license_by_key(lk)
+            break
+    if not lic or not dd.validate_license_for_sharing(lic.key, sharing):
+        raise UploadValidationError("Invalid license for image sharing")
+    with db_session() as conn:
+        row = conn.execute("SELECT id FROM images WHERE id = ?", (image_id,)).fetchone()
+        if not row:
+            raise UploadValidationError("Image not found")
+        conn.execute(
+            "UPDATE images SET license_id = ? WHERE id = ?",
+            (lic.id, image_id),
         )

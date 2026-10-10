@@ -4,9 +4,10 @@ import json
 import sqlite3
 import threading
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
 
 from app.config import Config
+from app.services.dictionary import get_dictionary
 
 _write_lock = threading.Lock()
 
@@ -33,14 +34,12 @@ def db_session() -> Iterator[sqlite3.Connection]:
 
 @contextmanager
 def write_lock() -> Iterator[None]:
-    """Block concurrent writers (e.g. backup) without holding an open transaction."""
     with _write_lock:
         yield
 
 
 @contextmanager
 def exclusive_write() -> Iterator[sqlite3.Connection]:
-    """Transactional write under the process-wide write lock."""
     with _write_lock:
         conn = get_connection()
         try:
@@ -54,8 +53,52 @@ def exclusive_write() -> Iterator[sqlite3.Connection]:
             conn.close()
 
 
+def _category_ids_for_image(conn: sqlite3.Connection, image_id: str) -> list[int]:
+    rows = conn.execute(
+        "SELECT category_id FROM image_categories WHERE image_id = ? ORDER BY category_id",
+        (image_id,),
+    ).fetchall()
+    return [int(r["category_id"]) for r in rows]
+
+
+def row_to_image(row: sqlite3.Row, conn: Optional[sqlite3.Connection] = None) -> dict[str, Any]:
+    dd = get_dictionary()
+    tags = json.loads(row["tags"]) if row["tags"] else []
+    license_id = int(row["license_id"])
+    lic = dd.license_by_id(license_id)
+
+    category_ids: list[int]
+    if conn is not None:
+        category_ids = _category_ids_for_image(conn, row["id"])
+    else:
+        with db_session() as c:
+            category_ids = _category_ids_for_image(c, row["id"])
+
+    categories = []
+    for cid in category_ids:
+        cat = dd.category_by_id(cid)
+        if cat:
+            categories.append(cat.key)
+
+    return {
+        "id": row["id"],
+        "original_name": row["original_name"],
+        "upload_time": row["upload_time"],
+        "mime_type": row["mime_type"],
+        "image_size": row["image_size"],
+        "sharing": row["sharing"],
+        "category_ids": category_ids,
+        "categories": categories,
+        "tags": tags,
+        "source": row["source"],
+        "license_id": license_id,
+        "license": lic.key if lic else None,
+    }
+
+
 def init_db() -> None:
     Config.ensure_dirs()
+    get_dictionary()
     with db_session() as conn:
         conn.executescript(
             """
@@ -66,11 +109,20 @@ def init_db() -> None:
                 mime_type TEXT NOT NULL,
                 image_size INTEGER NOT NULL,
                 sharing TEXT NOT NULL CHECK (sharing IN ('public', 'shared', 'private')),
-                category TEXT NOT NULL CHECK (category IN ('general', 'adult', 'violent')),
                 tags TEXT,
                 source TEXT,
-                license TEXT
+                license_id INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS image_categories (
+                image_id TEXT NOT NULL,
+                category_id INTEGER NOT NULL,
+                PRIMARY KEY (image_id, category_id),
+                FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_image_categories_cat
+                ON image_categories(category_id);
 
             CREATE TABLE IF NOT EXISTS fragments (
                 fragment_id TEXT NOT NULL,
@@ -85,9 +137,9 @@ def init_db() -> None:
                 ON fragments(fragment_id);
 
             CREATE TABLE IF NOT EXISTS nicknames (
-                nickname TEXT PRIMARY KEY,
-                image_id TEXT NOT NULL,
                 hash INTEGER NOT NULL,
+                image_id TEXT NOT NULL,
+                PRIMARY KEY (hash, image_id),
                 FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
             );
 
@@ -96,19 +148,3 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_images_upload ON images(upload_time DESC);
             """
         )
-
-
-def row_to_image(row: sqlite3.Row) -> dict[str, Any]:
-    tags = json.loads(row["tags"]) if row["tags"] else []
-    return {
-        "id": row["id"],
-        "original_name": row["original_name"],
-        "upload_time": row["upload_time"],
-        "mime_type": row["mime_type"],
-        "image_size": row["image_size"],
-        "sharing": row["sharing"],
-        "category": row["category"],
-        "tags": tags,
-        "source": row["source"],
-        "license": row["license"],
-    }

@@ -1,4 +1,4 @@
-# AGENTS.md — Image Store (Phase 1)
+# AGENTS.md — Image Store (v2 / release/v2)
 
 Guidance for automated coding agents working in this repository.
 
@@ -19,6 +19,7 @@ User-facing documentation: [README.md](README.md). Feature behavior: [Features.m
 | `app/routes/api.py` | JSON/multipart API |
 | `app/services/` | Domain logic (upload, fragments, thumbnails, nicknames, query, otp, backup, image_download) |
 | `app/templates/`, `app/static/` | Jinja templates and CSS |
+| `enums.yml` | Category/license data dictionary (loaded by `app/services/dictionary.py`) |
 | `run.py` | Entrypoint; loads `.env` via `python-dotenv` when installed |
 | `sample-clients/` | Standalone demos (not imported by main app) |
 | `Dockerfile` | Production image; `STORAGE_PATH=/data` volume |
@@ -62,9 +63,10 @@ Docker: `docker build -t image-store .` then run with `-v` on `/data`.
 1. **Sharing** is set at upload time and must not become editable later in UI/API.
 2. **Raw image bytes** are not served by UUID on a public GET API. Downloads use **`GET|POST /api/image`** with an **image page URL** (`/i/<uuid>`) or **`otp` + `id`** (GET only).
 3. **Fragments**: padded chunks, SHA-256 filenames; `public` vs `user` folders per spec in `app/services/fragments.py`.
-4. **Nicknames**: MD5 hex primary key; nearest-match hash logic in `app/services/nickname.py`.
-5. **Recall**: `callback` (POST `image_url`) **or** `redir` + `idhash` (redirect with OTP). If both query params are present, **callback wins**. OTP store: in-memory, 10s TTL, `app/services/otp.py`.
-6. **Backup**: `POST /api/backup` uses SQLite backup under write lock; thumbnail worker may trigger localhost backup after thumbnails.
+4. **Nicknames**: 24-bit hash in `nicknames` table; random on upload, user label sets first 24 bits of SHA-256; collisions allowed (`app/services/nickname.py`).
+5. **Categories/licenses**: from `enums.yml`; multi-category via `image_categories`; single `license_id` on `images`.
+6. **Recall**: `callback` (POST `image_url`) **or** `redir` + `idhash` (redirect with OTP). If both query params are present, **callback wins**. Multi-image nickname matches require checkbox selection before Done. OTP store: in-memory, 10s TTL, `app/services/otp.py`.
+7. **Backup**: `POST /api/backup` uses SQLite backup under write lock; thumbnail worker may trigger localhost backup after thumbnails.
 
 ## Configuration
 

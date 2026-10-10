@@ -1,0 +1,38 @@
+category:
+  General:
+    id: 0
+    help: Anything that can have unrestricted access by all age groups.
+  Adult:
+    id: 1
+    help: >-
+      Should not be accessible to children below a certain minimal legal age.
+      Applies to situations including but not restricted to eroticism and intimacy,
+      strong violence, grotesque and macabre scenes, etc.
+  Violent:
+    id: 2
+    help: Anything that triggers fear in varying intensity.
+  Grotesque:
+    id: 3
+    help: Strongly displeasing and revolting to common experience.
+
+license:
+  Private:
+    id: 0
+    help: Private images.
+    sharing: Private
+  Unknown:
+    id: 1
+    help: License is unknown
+    sharing: Shared
+  Platform Contributed:
+    id: 2
+    help: Any platform owned material that is free under custom license.
+    sharing: Shared
+  Creative Commons (CC):
+    id: 3
+    help: Broad category for any media under different CC licenses.
+    sharing: Public
+  Public Domain:
+    id: 4
+    help: Creative works whose copyrights have expired, never existed, or been waived.
+    sharing: Public

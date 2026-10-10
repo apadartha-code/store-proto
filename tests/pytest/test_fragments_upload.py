@@ -1,4 +1,4 @@
-"""Features.md §1 Storage — fragments; §2 Upload."""
+"""Features.md §2 Storage — fragments; §3 Upload."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ def _png_bytes() -> bytes:
 
 
 def test_fragment_roundtrip(app):
-    # Features.md §1 — padded SHA-256 fragments reconstruct original
     from app.config import Config
     from app.services.fragments import split_into_fragments
 
@@ -34,7 +33,12 @@ def test_ingest_and_reconstruct(app):
     image_id = ingest_image(
         "shot.png",
         raw,
-        {"sharing": "public", "category": "general", "source": "test", "tags": ["a"]},
+        {
+            "sharing": "public",
+            "categories": ["General"],
+            "source": "test",
+            "tags": ["a"],
+        },
     )
     got, mime = reconstruct_image(image_id)
     assert got == raw
@@ -42,7 +46,20 @@ def test_ingest_and_reconstruct(app):
 
 
 def test_public_requires_source(app):
-    from app.services.upload import UploadValidationError, ingest_image
+    from app.services.errors import UploadValidationError
+    from app.services.upload import ingest_image
 
     with pytest.raises(UploadValidationError):
-        ingest_image("x.png", _png_bytes(), {"sharing": "public", "category": "general"})
+        ingest_image(
+            "x.png",
+            _png_bytes(),
+            {"sharing": "public", "categories": ["General"]},
+        )
+
+
+def test_batch_upload_limits(app):
+    from app.services.errors import UploadValidationError
+    from app.services.upload import validate_batch_limits
+
+    with pytest.raises(UploadValidationError):
+        validate_batch_limits(51, 1000)

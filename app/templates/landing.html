@@ -57,11 +57,13 @@
             <option value="general" {% if category == 'general' %}selected{% endif %}>General</option>
             <option value="adult" {% if category == 'adult' %}selected{% endif %}>Adult</option>
             <option value="violent" {% if category == 'violent' %}selected{% endif %}>Violent</option>
+            <option value="grotesque" {% if category == 'grotesque' %}selected{% endif %}>Grotesque</option>
             <option value="all" {% if category == 'all' %}selected{% endif %}>All</option>
           </select>
         </label>
         <label>Sharing
           <select id="settings-sharing">
+            <option value="public_and_shared" {% if sharing == 'public_and_shared' %}selected{% endif %}>Public and Shared</option>
             <option value="public" {% if sharing == 'public' %}selected{% endif %}>Public</option>
             <option value="shared" {% if sharing == 'shared' %}selected{% endif %}>Shared</option>
             <option value="private" {% if sharing == 'private' %}selected{% endif %}>Private</option>
@@ -116,15 +118,24 @@
         <option value="private">Private</option>
       </select>
     </label>
-    <label>Category
-      <select name="category">
-        <option value="general">General</option>
-        <option value="adult">Adult</option>
-        <option value="violent">Violent</option>
+    <fieldset>
+      <legend>Categories (select at least one)</legend>
+      {% for key, cat in all_categories %}
+      <label class="checkbox-label" title="{{ cat.help }}">
+        <input type="checkbox" name="categories" value="{{ key }}" {% if key == 'General' %}checked{% endif %}>
+        {{ key }}
+      </label>
+      {% endfor %}
+    </fieldset>
+    <label>Source <input type="text" name="source" id="source-field" placeholder="Required for public"></label>
+    <label>License
+      <select name="license" id="upload-license">
+        {% for key, lic in all_licenses %}
+        <option value="{{ key }}" data-help="{{ lic.help }}" data-sharing="{{ lic.sharing or '' }}">{{ key }}</option>
+        {% endfor %}
       </select>
     </label>
-    <label>Source <input type="text" name="source" id="source-field" placeholder="Required for public"></label>
-    <label>License <input type="text" name="license"></label>
+    <p id="upload-license-help" class="hint"></p>
     <label>Tags <input type="text" name="tags" placeholder="optional, comma-separated"></label>
     <div class="dialog-actions">
       <button type="submit" data-testid="upload-submit">Upload</button>
@@ -193,7 +204,7 @@ document.getElementById('settings-apply').addEventListener('click', () => {
 function syncModeLinks() {
   const params = new URLSearchParams(window.location.search);
   const category = params.get('category') || 'general';
-  const sharing = params.get('sharing') || 'public';
+  const sharing = params.get('sharing') || 'public_and_shared';
   const q = params.get('q') || '';
   const latest = document.getElementById('mode-latest');
   const random = document.getElementById('mode-random');
@@ -220,8 +231,39 @@ function syncSource() {
   source.disabled = sharing.value === 'private';
   if (sharing.value === 'private') source.value = '';
 }
-sharing.addEventListener('change', syncSource);
-syncSource();
+const uploadLic = document.getElementById('upload-license');
+const uploadLicHelp = document.getElementById('upload-license-help');
+function syncUploadLicenseHelp() {
+  if (!uploadLic || !uploadLicHelp) return;
+  const opt = uploadLic.options[uploadLic.selectedIndex];
+  uploadLicHelp.textContent = opt ? (opt.dataset.help || '') : '';
+}
+function syncUploadLicensesForSharing() {
+  if (!uploadLic) return;
+  const s = sharing.value;
+  let firstValid = -1;
+  for (let i = 0; i < uploadLic.options.length; i++) {
+    const opt = uploadLic.options[i];
+    const restr = opt.dataset.sharing;
+    const ok = !restr || restr === s;
+    opt.hidden = !ok;
+    opt.disabled = !ok;
+    if (ok && firstValid < 0) firstValid = i;
+  }
+  if (firstValid >= 0 && uploadLic.options[uploadLic.selectedIndex]?.disabled) {
+    uploadLic.selectedIndex = firstValid;
+  }
+  syncUploadLicenseHelp();
+}
+function onSharingChange() {
+  syncSource();
+  syncUploadLicensesForSharing();
+}
+sharing.addEventListener('change', onSharingChange);
+onSharingChange();
+if (uploadLic) {
+  uploadLic.addEventListener('change', syncUploadLicenseHelp);
+}
 
 function collectUploadErrors(data) {
   if (Array.isArray(data.details)) return data.details;

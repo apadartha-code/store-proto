@@ -5,9 +5,11 @@
   <title>Returning…</title>
 </head>
 <body>
-  <p>Returning selected image to caller…</p>
+  <p>Returning selected image(s) to caller…</p>
   <form id="postback" method="post" action="{{ callback }}">
-    <input type="hidden" name="image_url" value="{{ image_url }}">
+    {% for url in image_urls %}
+    <input type="hidden" name="image_url" value="{{ url }}">
+    {% endfor %}
   </form>
   <script>document.getElementById('postback').submit();</script>
 </body>

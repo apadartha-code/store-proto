@@ -14,6 +14,15 @@ class Config:
     FRAGMENT_SIZE_KB = _int_env("FRAGMENT_SIZE_KB", 64)
     LISTEN_PORT = _int_env("LISTEN_PORT", 5000)
     MAX_UPLOAD_KB = _int_env("MAX_UPLOAD_KB", 1000)
+    MAX_UPLOAD_TOTAL_BYTES = _int_env("MAX_UPLOAD_TOTAL_BYTES", 50 * 1024 * 1024)
+    MAX_UPLOAD_FILE_COUNT = _int_env("MAX_UPLOAD_FILE_COUNT", 50)
+
+    ENUMS_PATH = Path(
+        os.environ.get(
+            "ENUMS_PATH",
+            str(Path(__file__).resolve().parents[1] / "enums.yml"),
+        )
+    ).resolve()
     CERT_PATH = os.environ.get("CERT_PATH") or None
     KEY_PATH = os.environ.get("KEY_PATH") or None
 

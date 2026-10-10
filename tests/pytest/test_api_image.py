@@ -1,4 +1,4 @@
-"""Features.md §6 Image download API."""
+"""Features.md §8 Image download API."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def _ingest():
     image_id = ingest_image(
         "dl.png",
         data,
-        {"sharing": "public", "category": "general", "source": "t"},
+        {"sharing": "public", "categories": ["General"], "source": "t"},
     )
     return image_id, data
 

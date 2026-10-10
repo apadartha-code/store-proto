@@ -10,6 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY enums.yml .
 COPY run.py .
 
 ENV STORAGE_PATH=/data

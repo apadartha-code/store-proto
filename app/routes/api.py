@@ -6,14 +6,27 @@ from flask import Blueprint, jsonify, request
 
 from app.config import Config
 from app.services.backup import backup_database, safe_file_copy_backup
+from app.services.categories import resolve_category_keys, set_image_categories
+from app.services.errors import UploadValidationError
 from app.services.image_download import resolve_download_url, send_image_download
-from app.services.nickname import find_nearest_image_id, list_nicknames_for_image, try_add_nickname
+from app.services.nickname import (
+    find_images_by_nickname,
+    hash_to_display,
+    list_nickname_hashes_for_image,
+    set_user_nickname,
+)
 from app.services.query import get_image, list_images, random_images
-from app.services.upload import UploadValidationError, ingest_image, update_image_tags
+from app.services.upload import (
+    ingest_image,
+    update_image_license,
+    update_image_tags,
+    validate_batch_limits,
+)
 
 logger = logging.getLogger(__name__)
 
 api_bp = Blueprint("api", __name__)
+
 
 @api_bp.route("/image", methods=["GET", "POST"])
 def download_image():
@@ -59,14 +72,25 @@ def api_upload():
         logger.error("Upload request missing files field")
         return jsonify({"error": "No files field"}), 400
 
-    files = request.files.getlist("files")
+    files = [f for f in request.files.getlist("files") if f.filename]
     if not files:
         logger.error("Upload request contained no files")
         return jsonify({"error": "No files uploaded"}), 400
 
+    payloads: list[tuple] = []
+    try:
+        for f in files:
+            payloads.append((f, f.read()))
+        validate_batch_limits(
+            len(payloads),
+            sum(len(raw) for _, raw in payloads),
+        )
+    except UploadValidationError as e:
+        return jsonify({"error": str(e)}), 400
+
     meta = {
         "sharing": request.form.get("sharing", "public"),
-        "category": request.form.get("category", "general"),
+        "categories": request.form.getlist("categories"),
         "source": request.form.get("source"),
         "license": request.form.get("license"),
         "tags": request.form.get("tags", ""),
@@ -74,12 +98,9 @@ def api_upload():
 
     ids = []
     errors = []
-    for f in files:
-        if not f.filename:
-            continue
+    for f, raw in payloads:
         logger.info("Received upload file: %s", f.filename)
         try:
-            raw = f.read()
             image_id = ingest_image(f.filename, raw, meta)
             ids.append(image_id)
         except UploadValidationError as e:
@@ -103,7 +124,7 @@ def api_list_images():
         items = random_images(
             limit=Config.PAGE_SIZE,
             category=category or "general",
-            sharing=sharing or "public",
+            sharing=sharing or "public_and_shared",
         )
         return jsonify({"items": items, "page": 1, "pages": 1, "total": len(items)})
 
@@ -126,8 +147,8 @@ def api_get_image(image_id: str):
     img = get_image(image_id)
     if not img:
         return jsonify({"error": "Not found"}), 404
-    nicknames = list_nicknames_for_image(image_id)
-    img["nicknames"] = nicknames
+    hashes = list_nickname_hashes_for_image(image_id)
+    img["nickname_hashes"] = [hash_to_display(h) for h in hashes]
     img["image_url"] = request.host_url.rstrip("/") + f"/i/{image_id}"
     return jsonify(img)
 
@@ -145,14 +166,17 @@ def api_patch_image(image_id: str):
             tags = [t.strip() for t in tags.split(",") if t.strip()]
         update_image_tags(image_id, tags)
 
+    if "categories" in data:
+        keys = data["categories"]
+        if isinstance(keys, str):
+            keys = [k.strip() for k in keys.split(",") if k.strip()]
+        set_image_categories(image_id, resolve_category_keys(keys))
+
+    if "license" in data and data["license"]:
+        update_image_license(image_id, data["license"], img["sharing"])
+
     if "nickname" in data and data["nickname"]:
-        added = try_add_nickname(image_id, data["nickname"])
-        if not added:
-            logger.error(
-                "Nickname add failed for image_id=%s: conflict or invalid",
-                image_id,
-            )
-            return jsonify({"error": "Nickname conflict or invalid"}), 409
+        set_user_nickname(image_id, data["nickname"])
 
     return api_get_image(image_id)
 
@@ -162,14 +186,18 @@ def api_nearest_nickname():
     text = request.args.get("q", "")
     if not text:
         return jsonify({"error": "q is required"}), 400
-    image_id = find_nearest_image_id(text)
-    if not image_id:
+    image_ids = find_images_by_nickname(text)
+    if not image_ids:
         return jsonify({"error": "No images"}), 404
-    img = get_image(image_id)
-    return jsonify(
-        {
-            "image": img,
-            "image_url": request.host_url.rstrip("/") + f"/i/{image_id}",
-            "thumbnail_url": f"/thumb/{image_id}",
-        }
-    )
+    items = []
+    for image_id in image_ids:
+        img = get_image(image_id)
+        if img:
+            items.append(
+                {
+                    "image": img,
+                    "image_url": request.host_url.rstrip("/") + f"/i/{image_id}",
+                    "thumbnail_url": f"/thumb/{image_id}",
+                }
+            )
+    return jsonify({"items": items, "count": len(items)})
