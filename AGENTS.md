@@ -99,6 +99,7 @@ Independent Flask/CLI apps under `sample-clients/`—change them without couplin
 | Folder | Role |
 |--------|------|
 | `cli-downloader/` | Stdlib CLI → `POST /api/image` |
+| `batch-uploader/` | Stdlib CLI batch upload → `POST /api/upload` |
 | `app-callback/` | Recall with `callback` (port 4999) |
 | `app-redirect/` | Recall with `redir` + OTP (port 4998) |
 
