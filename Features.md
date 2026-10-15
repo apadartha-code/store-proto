@@ -106,7 +106,7 @@ SHA-256 hex of padded chunk content, size in KB, image FK, index order. Public f
 
 - Grid up to **6×10** thumbnails (`PAGE_ROWS` × `PAGE_COLS`); default sort **latest upload** within category/sharing filters.
 - **Latest** / **Random** view modes (`random=1`; random does not use search query).
-- Single **search** box: fuzzy match with weights — **tags (4)**, original name **(2)**, **categories (1)** (all assigned category names), **sharing (1)**.
+- Single **search** box: fuzzy match with weights — **tags (4)**, original name **(2)**, **categories (1)** (all assigned category names), **sharing (1)**. Per-field token matching ignores tokens shorter than **`FUZZY_MIN_TOKEN_LENGTH`** (default **3**) so single-letter filename segments (e.g. Flickr `_o`) do not match unrelated query terms; whole-field substring match (`query` contained in the field text) is unchanged.
 - **Category** filter (General, Adult, Violent, Grotesque, All) and **sharing** filter in gear **Settings**; persisted in browser `sessionStorage` for the session.
 - **Sharing** default filter: **Public and Shared** (`public_and_shared`) — includes both `public` and `shared` images, excludes `private`.
 - **Upload** control in site header only (not in gallery toolbar).

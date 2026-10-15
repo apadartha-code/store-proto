@@ -5,6 +5,7 @@ import random
 import re
 from typing import Any, Optional
 
+from app.config import Config
 from app.db import db_session, row_to_image
 from app.services.dictionary import get_dictionary
 
@@ -56,15 +57,21 @@ def _build_filters(
     return " AND ".join(clauses), params
 
 
-def _term_matches_fuzzy(term: str, text: str) -> bool:
+def _term_matches_fuzzy(
+    term: str,
+    text: str,
+    min_token_length: Optional[int] = None,
+) -> bool:
     if not text or not term:
         return False
+    if min_token_length is None:
+        min_token_length = Config.FUZZY_MIN_TOKEN_LENGTH
     term_l = term.lower()
     text_l = text.lower()
     if term_l in text_l:
         return True
     for word in re.split(r"[\s_.,\-/]+", text_l):
-        if not word:
+        if not word or len(word) < min_token_length:
             continue
         if term_l in word or word in term_l:
             return True

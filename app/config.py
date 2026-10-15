@@ -16,6 +16,7 @@ class Config:
     MAX_UPLOAD_KB = _int_env("MAX_UPLOAD_KB", 1000)
     MAX_UPLOAD_TOTAL_BYTES = _int_env("MAX_UPLOAD_TOTAL_BYTES", 50 * 1024 * 1024)
     MAX_UPLOAD_FILE_COUNT = _int_env("MAX_UPLOAD_FILE_COUNT", 50)
+    FUZZY_MIN_TOKEN_LENGTH = _int_env("FUZZY_MIN_TOKEN_LENGTH", 3)
 
     ENUMS_PATH = Path(
         os.environ.get(

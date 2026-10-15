@@ -48,6 +48,7 @@ Settings use **environment variables** (see `.env.example`). Load a local `.env`
 | `MAX_UPLOAD_KB` | `1000` | Max upload size per image |
 | `MAX_UPLOAD_TOTAL_BYTES` | `52428800` | Max combined bytes per batch upload (50 MiB) |
 | `MAX_UPLOAD_FILE_COUNT` | `50` | Max files per batch upload |
+| `FUZZY_MIN_TOKEN_LENGTH` | `3` | Min length for filename/tag tokens in gallery fuzzy word match |
 | `ENUMS_PATH` | `enums.yml` (repo root) | Path to category/license dictionary YAML |
 | `CERT_PATH` | (unset) | TLS certificate; HTTPS only if set |
 | `KEY_PATH` | (optional) | TLS private key |
