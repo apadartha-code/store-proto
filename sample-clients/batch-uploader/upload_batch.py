@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Iterable, Optional, Sequence, TextIO
 
 _LIMIT_KEYS = (
@@ -138,13 +138,29 @@ def detect_image_mime(path: Path) -> Optional[str]:
     return None
 
 
-def _expand_pattern(pattern: str) -> list[Path]:
+def glob_pattern_is_absolute(pattern: str) -> bool:
+    """True when the glob is rooted (e.g. /var/photos/**/*.jpg on Unix)."""
+    if pattern.startswith("/"):
+        return True
+    if os.name == "nt" and len(pattern) > 1 and pattern[1] == ":":
+        return True
+    return bool(PurePath(pattern).anchor)
+
+
+def resolve_glob_pattern(pattern: str, pattern_root: Path) -> str:
+    """Leave absolute globs unchanged; anchor relative globs under pattern_root."""
+    if glob_pattern_is_absolute(pattern):
+        return pattern
+    return str((pattern_root / pattern).as_posix())
+
+
+def _expand_pattern(pattern: str, pattern_root: Path) -> list[Path]:
     pattern = pattern.strip()
     if not pattern:
         return []
     if pattern.startswith("re:"):
         regex = re.compile(pattern[3:])
-        root = Path.cwd()
+        root = pattern_root
         found: list[Path] = []
         for dirpath, _, filenames in os.walk(root):
             for name in filenames:
@@ -156,15 +172,21 @@ def _expand_pattern(pattern: str) -> list[Path]:
                 if regex.search(str(resolved)) or regex.search(str(p)):
                     found.append(resolved)
         return found
-    matches = [Path(p) for p in glob.iglob(pattern, recursive=True)]
+    glob_pattern = resolve_glob_pattern(pattern, pattern_root)
+    matches = [Path(p) for p in glob.iglob(glob_pattern, recursive=True)]
     return [p.resolve() for p in matches if p.is_file()]
 
 
-def collect_paths_from_patterns(patterns: Sequence[str]) -> list[Path]:
+def collect_paths_from_patterns(
+    patterns: Sequence[str],
+    *,
+    pattern_root: Optional[Path] = None,
+) -> list[Path]:
+    root = (pattern_root or Path.cwd()).resolve()
     seen: set[Path] = set()
     ordered: list[Path] = []
     for pattern in patterns:
-        for path in _expand_pattern(pattern):
+        for path in _expand_pattern(pattern, root):
             if path not in seen:
                 seen.add(path)
                 ordered.append(path)
@@ -434,7 +456,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Pattern sources (exactly one required):\n"
             "  -g/--glob may be repeated; -F/--patterns-file lists one pattern per line\n"
             "  (use -F - for stdin; not combinable with -g).\n"
-            "Patterns are glob paths (recursive with **). Prefix a pattern with re: for regex.\n"
+            "Patterns are glob paths (recursive with **). Relative patterns use the current\n"
+            "working directory. Absolute paths (leading /) are used as-is. Prefix re: for regex\n"
+            "(walks under cwd).\n"
             "\n"
             "Upload limits (all required, positive integers):\n"
             "  MAX_UPLOAD_KB, MAX_UPLOAD_TOTAL_BYTES, MAX_UPLOAD_FILE_COUNT\n"

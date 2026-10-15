@@ -224,7 +224,7 @@ Then `GET /api/image?otp=...&id=<base64(id_bytes)>`.
 | `sample-clients/app-callback/` | Recall `callback` (port 4999) |
 | `sample-clients/app-redirect/` | Recall `redir` + OTP (port 4998) |
 
-**Batch uploader** (`upload_batch.py`): stdlib-only. Patterns via repeated `-g`, `-F` file, or `-F -` (stdin; not combinable with `-g`). Optional `-I` ignore list for resume. Requires `--sharing` and `--license`; `--source` when public. Reads `MAX_UPLOAD_KB`, `MAX_UPLOAD_TOTAL_BYTES`, and `MAX_UPLOAD_FILE_COUNT` from `./.env`, overridden by the environment and `--env-file`. Sorts eligible images by size, packs batches, logs to `--log-file` or `/tmp`. Flags: `--dry-run`, `--brief`, `--host` (default `127.0.0.1:5000`). Run with `-h` for full help.
+**Batch uploader** (`upload_batch.py`): stdlib-only. Patterns via repeated `-g`, `-F` file, or `-F -` (stdin; not combinable with `-g`). Relative globs use the process working directory; absolute paths (`/…`) are unchanged. Optional `-I` ignore list for resume. Requires `--sharing` and `--license`; `--source` when public. Reads `MAX_UPLOAD_KB`, `MAX_UPLOAD_TOTAL_BYTES`, and `MAX_UPLOAD_FILE_COUNT` from `./.env`, overridden by the environment and `--env-file`. Sorts eligible images by size, packs batches, logs to `--log-file` or `/tmp`. Flags: `--dry-run`, `--brief`, `--host` (default `127.0.0.1:5000`). Run with `-h` for full help.
 
 ---
 

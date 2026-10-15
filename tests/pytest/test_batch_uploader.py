@@ -91,6 +91,34 @@ def test_prepare_files_batches_by_size(tmp_path):
     assert all(s <= 150 for s in sizes)
 
 
+def test_glob_pattern_is_absolute():
+    assert upload_batch.glob_pattern_is_absolute("/var/data/**/*.jpg")
+    assert not upload_batch.glob_pattern_is_absolute("data/**/*.jpg")
+
+
+def test_collect_paths_relative_to_cwd(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    data.mkdir()
+    pic = data / "shot.png"
+    pic.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 8)
+    monkeypatch.chdir(tmp_path)
+    paths = upload_batch.collect_paths_from_patterns(["data/*.png"])
+    assert pic.resolve() in paths
+
+
+def test_collect_paths_absolute_ignores_cwd(tmp_path, monkeypatch):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    pic = elsewhere / "abs.png"
+    pic.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 8)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.chdir(empty)
+    pattern = str(elsewhere / "*.png")
+    paths = upload_batch.collect_paths_from_patterns([pattern])
+    assert pic.resolve() in paths
+
+
 def test_patterns_file_is_stdin():
     assert upload_batch.patterns_file_is_stdin(Path("-"))
     assert not upload_batch.patterns_file_is_stdin(Path("patterns.txt"))
