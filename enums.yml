@@ -14,6 +14,9 @@ category:
   Grotesque:
     id: 3
     help: Strongly displeasing and revolting to common experience.
+  Restricted:
+    id: 4
+    help: Sensuous, erotic, nudity, sexual acts, etc.
 
 license:
   Private:

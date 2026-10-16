@@ -111,6 +111,8 @@ SHA-256 hex of padded chunk content, size in KB, image FK, index order. Public f
 - **Sharing** default filter: **Public and Shared** (`public_and_shared`) — includes both `public` and `shared` images, excludes `private`.
 - **Upload** control in site header only (not in gallery toolbar).
 - Pagination in header/footer of grid.
+- **Bulk selection** (latest, search, and random grids): checkbox on each thumbnail; toolbar on the pager row (right-aligned) shows selected count (with **Clear**), **Select All** (current page), and **Bulk edit** (disabled when nothing selected). Selection is stored in `sessionStorage` and persists across pagination until the gallery context changes (`q`, `category`, `sharing`, `random`) or a bulk edit submit succeeds.
+- **Bulk edit** (`/bulk-edit`): left pane lists selected thumbnails (checkboxes control which rows are included in submit; unchecking does not remove the thumbnail). **Select All** / **Clear** above the scroll area; **Clear** unchecks all and disables submit. Right pane: category checkboxes (when at least one is checked, categories **replace** all assignments on selected images) and comma-separated tags (**merged** into existing tags, case-insensitive dedup). **Cancel** returns to the gallery; after a successful submit it reads **Done** (same link). Success overlay auto-fades; failure overlay requires dismiss. `POST /api/images/bulk-edit` with `image_ids` and optional `categories` / `tags`.
 
 ---
 

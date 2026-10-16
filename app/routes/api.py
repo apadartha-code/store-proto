@@ -16,6 +16,7 @@ from app.services.nickname import (
     set_user_nickname,
 )
 from app.services.query import get_image, list_images, random_images
+from app.services.bulk_edit import bulk_update_metadata
 from app.services.upload import (
     ingest_image,
     update_image_license,
@@ -151,6 +152,47 @@ def api_get_image(image_id: str):
     img["nickname_hashes"] = [hash_to_display(h) for h in hashes]
     img["image_url"] = request.host_url.rstrip("/") + f"/i/{image_id}"
     return jsonify(img)
+
+
+@api_bp.post("/images/bulk-edit")
+def api_bulk_edit_images():
+    """Features.md §4 — bulk category overwrite and tag merge."""
+    data = request.get_json(silent=True) or {}
+    image_ids = data.get("image_ids")
+    if not isinstance(image_ids, list) or not image_ids:
+        return jsonify({"error": "image_ids is required"}), 400
+
+    category_keys = None
+    if "categories" in data:
+        keys = data["categories"]
+        if isinstance(keys, str):
+            keys = [k.strip() for k in keys.split(",") if k.strip()]
+        if not isinstance(keys, list):
+            return jsonify({"error": "categories must be a list"}), 400
+        category_keys = keys
+
+    tags_to_add = None
+    if "tags" in data:
+        tags = data["tags"]
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.split(",") if t.strip()]
+        if not isinstance(tags, list):
+            return jsonify({"error": "tags must be a list"}), 400
+        tags_to_add = tags
+
+    try:
+        result = bulk_update_metadata(
+            image_ids,
+            category_keys=category_keys,
+            tags_to_add=tags_to_add,
+        )
+    except UploadValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    status = 200
+    if result.get("failed"):
+        result["partial"] = True
+    return jsonify(result), status
 
 
 @api_bp.patch("/images/<image_id>")

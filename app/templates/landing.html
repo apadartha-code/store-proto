@@ -26,6 +26,17 @@
 </div>
 {% endmacro %}
 
+{% macro selection_toolbar() %}
+<div class="gallery-selection-toolbar" id="gallery-selection-toolbar">
+  <span class="selection-count-wrap hidden" id="selection-count-wrap" data-testid="selection-count-wrap">
+    <span id="selection-count" data-testid="selection-count">0 selected</span>
+    <button type="button" class="linkish" id="selection-clear" data-testid="selection-clear">Clear</button>
+  </span>
+  <button type="button" id="selection-select-all" data-testid="selection-select-all">Select All</button>
+  <button type="button" id="selection-bulk-edit" data-testid="selection-bulk-edit" disabled>Bulk edit</button>
+</div>
+{% endmacro %}
+
 {% block content %}
 <section class="gallery-controls">
   <form class="search-bar" method="get" action="{{ url_for('web.landing') }}" id="gallery-search-form">
@@ -91,14 +102,22 @@
   </p>
 </section>
 
-{{ pager_controls() }}
+<div class="pager-row">
+  {{ pager_controls() }}
+  {{ selection_toolbar() }}
+</div>
 
 <section class="grid" style="--cols: 6;">
   {% for img in images %}
-  <a class="thumb" href="{{ url_for('web.image_detail', image_id=img.id) }}">
-    <img src="{{ url_for('web.serve_thumbnail', image_id=img.id) }}" alt="{{ img.original_name }}" loading="lazy">
-    <span class="caption">{{ img.original_name }}</span>
-  </a>
+  <div class="thumb-cell" data-image-id="{{ img.id }}" data-image-name="{{ img.original_name }}">
+    <label class="thumb-select" title="Select for bulk edit">
+      <input type="checkbox" class="gallery-select-cb" data-testid="gallery-select-{{ img.id }}" aria-label="Select {{ img.original_name }}">
+    </label>
+    <a class="thumb" href="{{ url_for('web.image_detail', image_id=img.id) }}">
+      <img src="{{ url_for('web.serve_thumbnail', image_id=img.id) }}" alt="{{ img.original_name }}" loading="lazy">
+      <span class="caption">{{ img.original_name }}</span>
+    </a>
+  </div>
   {% else %}
   <p class="empty">No images match this view. Try another search or adjust settings.</p>
   {% endfor %}
@@ -333,5 +352,9 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
     renderUploadFailures([]);
   }
 });
+</script>
+<script src="{{ url_for('static', filename='gallery_selection.js') }}"></script>
+<script>
+  ImageStoreGallerySelection.initGallerySelection();
 </script>
 {% endblock %}

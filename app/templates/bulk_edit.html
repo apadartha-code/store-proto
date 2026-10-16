@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Bulk edit — Image Store{% endblock %}
+
+{% block content %}
+<section class="bulk-edit">
+  <h1>Bulk edit</h1>
+  <p class="hint">Categories replace existing assignments; tags are added if not already present.</p>
+
+  <div class="bulk-edit-layout">
+    <aside class="bulk-edit-pane">
+      <div class="bulk-edit-pane-actions">
+        <button type="button" id="bulk-pane-select-all" data-testid="bulk-pane-select-all">Select All</button>
+        <button type="button" id="bulk-pane-clear" data-testid="bulk-pane-clear">Clear</button>
+      </div>
+      <div class="bulk-edit-thumbs" id="bulk-edit-thumbs" data-testid="bulk-edit-thumbs"></div>
+    </aside>
+
+    <div class="bulk-edit-controls">
+      <fieldset class="category-fieldset">
+        <legend>Categories (overwrite when at least one is checked)</legend>
+        {% for key, cat in all_categories %}
+        <label class="checkbox-label" title="{{ cat.help }}">
+          <input type="checkbox" class="bulk-category-cb" value="{{ key }}" data-testid="bulk-category-{{ key }}">
+          {{ key }}
+        </label>
+        {% endfor %}
+      </fieldset>
+      <label>Tags to add
+        <input type="text" id="bulk-tags" data-testid="bulk-tags" placeholder="optional, comma-separated">
+      </label>
+      <div class="bulk-edit-actions">
+        <button type="button" class="primary" id="bulk-submit" data-testid="bulk-submit" disabled>Submit</button>
+        <a href="{{ url_for('web.landing') }}" class="btn" id="bulk-cancel" data-testid="bulk-cancel">Cancel</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="bulk-overlay-success" class="bulk-overlay bulk-overlay-success hidden" data-testid="bulk-overlay-success" role="status">
+  <p id="bulk-overlay-success-text"></p>
+</div>
+<div id="bulk-overlay-failure" class="bulk-overlay bulk-overlay-failure hidden" data-testid="bulk-overlay-failure" role="alert">
+  <p id="bulk-overlay-failure-text"></p>
+  <button type="button" id="bulk-overlay-failure-dismiss" data-testid="bulk-overlay-failure-dismiss">Dismiss</button>
+</div>
+
+<script src="{{ url_for('static', filename='gallery_selection.js') }}"></script>
+<script>
+(function () {
+  const sel = window.ImageStoreGallerySelection;
+  let state = sel.ensureContext(sel.loadState());
+  sel.saveState(state);
+  const ids = sel.getSelectedIds(state);
+  if (!ids.length) {
+    window.location.replace('/');
+    return;
+  }
+
+  let submitSucceeded = false;
+  const thumbsEl = document.getElementById('bulk-edit-thumbs');
+  const submitBtn = document.getElementById('bulk-submit');
+  const cancelLink = document.getElementById('bulk-cancel');
+
+  function checkedIds() {
+    return Array.from(thumbsEl.querySelectorAll('.bulk-thumb-cb:checked')).map((cb) => cb.value);
+  }
+
+  function syncSubmitEnabled() {
+    submitBtn.disabled = checkedIds().length === 0;
+  }
+
+  function renderThumbs() {
+    thumbsEl.replaceChildren();
+    for (const id of Object.keys(state.selected)) {
+      const meta = state.selected[id];
+      const row = document.createElement('div');
+      row.className = 'bulk-thumb-row';
+      row.dataset.imageId = id;
+      const label = document.createElement('label');
+      label.className = 'bulk-thumb-label';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'bulk-thumb-cb';
+      cb.value = id;
+      cb.checked = true;
+      cb.dataset.testid = 'bulk-thumb-' + id;
+      cb.addEventListener('change', syncSubmitEnabled);
+      const img = document.createElement('img');
+      img.src = '/thumb/' + encodeURIComponent(id);
+      img.alt = meta.name || id;
+      const cap = document.createElement('span');
+      cap.className = 'caption';
+      cap.textContent = meta.name || id;
+      label.appendChild(cb);
+      label.appendChild(img);
+      label.appendChild(cap);
+      row.appendChild(label);
+      thumbsEl.appendChild(row);
+    }
+    syncSubmitEnabled();
+  }
+
+  document.getElementById('bulk-pane-select-all').addEventListener('click', () => {
+    thumbsEl.querySelectorAll('.bulk-thumb-cb').forEach((cb) => { cb.checked = true; });
+    syncSubmitEnabled();
+  });
+
+  document.getElementById('bulk-pane-clear').addEventListener('click', () => {
+    thumbsEl.querySelectorAll('.bulk-thumb-cb').forEach((cb) => { cb.checked = false; });
+    syncSubmitEnabled();
+  });
+
+  function showSuccess(message) {
+    const el = document.getElementById('bulk-overlay-success');
+    document.getElementById('bulk-overlay-success-text').textContent = message;
+    el.classList.remove('hidden');
+    el.classList.add('visible');
+    window.setTimeout(() => {
+      el.classList.remove('visible');
+      el.classList.add('hidden');
+    }, 3200);
+  }
+
+  function showFailure(message) {
+    const el = document.getElementById('bulk-overlay-failure');
+    document.getElementById('bulk-overlay-failure-text').textContent = message;
+    el.classList.remove('hidden');
+  }
+
+  document.getElementById('bulk-overlay-failure-dismiss').addEventListener('click', () => {
+    document.getElementById('bulk-overlay-failure').classList.add('hidden');
+  });
+
+  document.getElementById('bulk-overlay-success').addEventListener('click', () => {
+    document.getElementById('bulk-overlay-success').classList.add('hidden');
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    const imageIds = checkedIds();
+    if (!imageIds.length) return;
+
+    const payload = { image_ids: imageIds };
+    const categoryCbs = document.querySelectorAll('.bulk-category-cb:checked');
+    if (categoryCbs.length) {
+      payload.categories = Array.from(categoryCbs).map((cb) => cb.value);
+    }
+    const tagsRaw = document.getElementById('bulk-tags').value.trim();
+    if (tagsRaw) {
+      payload.tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+    }
+    if (!payload.categories && !payload.tags) {
+      showFailure('Choose at least one category or enter tags to add.');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    try {
+      const res = await fetch('/api/images/bulk-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showFailure(data.error || 'Bulk edit failed.');
+        syncSubmitEnabled();
+        return;
+      }
+      const n = data.updated_count || (data.updated || []).length;
+      let msg = 'Updated ' + n + ' image(s).';
+      if (data.failed && data.failed.length) {
+        msg += ' ' + data.failed.length + ' failed.';
+      }
+      showSuccess(msg);
+      submitSucceeded = true;
+      cancelLink.textContent = 'Done';
+      sel.clearSelectionStorage();
+    } catch {
+      showFailure('Request failed. Check the server logs.');
+    }
+    syncSubmitEnabled();
+  });
+
+  renderThumbs();
+})();
+</script>
+{% endblock %}

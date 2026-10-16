@@ -116,6 +116,11 @@ def landing():
     )
 
 
+@web_bp.get("/bulk-edit")
+def bulk_edit_page():
+    return render_template("bulk_edit.html")
+
+
 @web_bp.get("/image/<image_id>")
 def image_detail(image_id: str):
     img = get_image(image_id)
