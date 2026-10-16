@@ -93,7 +93,20 @@ def row_to_image(row: sqlite3.Row, conn: Optional[sqlite3.Connection] = None) ->
         "source": row["source"],
         "license_id": license_id,
         "license": lic.key if lic else None,
+        "content_checksum": row["content_checksum"],
     }
+
+
+def _migrate_images_content_checksum(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(images)")}
+    if "content_checksum" not in cols:
+        conn.execute("ALTER TABLE images ADD COLUMN content_checksum TEXT")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_images_content_checksum_size
+        ON images(content_checksum, image_size)
+        """
+    )
 
 
 def init_db() -> None:
@@ -108,10 +121,12 @@ def init_db() -> None:
                 upload_time TEXT NOT NULL,
                 mime_type TEXT NOT NULL,
                 image_size INTEGER NOT NULL,
+                content_checksum TEXT NOT NULL,
                 sharing TEXT NOT NULL CHECK (sharing IN ('public', 'shared', 'private')),
                 tags TEXT,
                 source TEXT,
-                license_id INTEGER NOT NULL
+                license_id INTEGER NOT NULL,
+                UNIQUE (content_checksum, image_size)
             );
 
             CREATE TABLE IF NOT EXISTS image_categories (
@@ -148,3 +163,4 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_images_upload ON images(upload_time DESC);
             """
         )
+        _migrate_images_content_checksum(conn)

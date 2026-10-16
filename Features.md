@@ -53,7 +53,7 @@ When upload metadata omits `license`, the app picks the lowest-id license valid 
 
 ### Image records
 
-UUID, original name, upload time, MIME, size, **sharing** (`public` | `shared` | `private`), **license_id** (dictionary), optional tags (JSON list), optional **source** (required for public at upload).
+UUID, original name, upload time, MIME, **image_size** (bytes), **content_checksum** (SHA-256 hex of raw file bytes), **sharing** (`public` | `shared` | `private`), **license_id** (dictionary), optional tags (JSON list), optional **source** (required for public at upload). **`(content_checksum, image_size)` is unique** — duplicate uploads of the same bytes are rejected even when `original_name` differs.
 
 - **Sharing** is set at upload and **cannot** be changed later in UI or API.
 - **Categories**: one-to-many via `image_categories (image_id, category_id)`. Every category id must exist in `enums.yml`. Gallery category filter matches images that include that category.
@@ -94,7 +94,7 @@ SHA-256 hex of padded chunk content, size in KB, image FK, index order. Public f
 
 ### Pipeline
 
-- Image split into fixed-size fragments (`FRAGMENT_SIZE_KB`, last chunk zero-padded); UUID assigned.
+- Image split into fixed-size fragments (`FRAGMENT_SIZE_KB`, last chunk zero-padded); UUID assigned; **content_checksum** stored and deduplicated with **image_size**.
 - On upload: **random 24-bit nickname hash** inserted (collisions allowed).
 - Background thumbnail generation; after at least one thumbnail, localhost `POST /api/backup` may run.
 - Batch upload: multiple files share one metadata form (`POST /api/upload`, multipart field `files`).

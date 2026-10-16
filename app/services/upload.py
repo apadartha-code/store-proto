@@ -12,7 +12,7 @@ from app.db import db_session
 from app.services.categories import resolve_category_keys, set_image_categories
 from app.services.dictionary import get_dictionary
 from app.services.errors import UploadValidationError
-from app.services.fragments import split_into_fragments
+from app.services.fragments import sha256_hex, split_into_fragments
 from app.services.nickname import add_random_default_nickname
 from app.services.thumbnail import schedule_thumbnail, thumbnail_path
 
@@ -117,6 +117,22 @@ def ingest_image(
         logger.error("Upload rejected for %s: %s (detected %s)", filename, msg, mime)
         raise UploadValidationError(msg)
 
+    image_size = len(raw)
+    content_checksum = sha256_hex(raw)
+
+    with db_session() as conn:
+        duplicate = conn.execute(
+            """
+            SELECT id FROM images
+            WHERE content_checksum = ? AND image_size = ?
+            """,
+            (content_checksum, image_size),
+        ).fetchone()
+        if duplicate:
+            msg = "Duplicate image content"
+            logger.error("Upload rejected for %s: %s", filename, msg)
+            raise UploadValidationError(msg)
+
     image_id = str(uuid.uuid4())
     upload_time = datetime.now(timezone.utc).isoformat()
     fragments = split_into_fragments(raw, fields["sharing"])
@@ -126,15 +142,16 @@ def ingest_image(
             """
             INSERT INTO images (
                 id, original_name, upload_time, mime_type, image_size,
-                sharing, tags, source, license_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                content_checksum, sharing, tags, source, license_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 image_id,
                 filename,
                 upload_time,
                 mime,
-                len(raw),
+                image_size,
+                content_checksum,
                 fields["sharing"],
                 json.dumps(fields["tags"]),
                 fields["source"],
@@ -162,12 +179,13 @@ def ingest_image(
     thumb = thumbnail_path(image_id)
     logger.info(
         "Ingested image original_name=%s image_id=%s mime_type=%s image_size=%s "
-        "upload_time=%s sharing=%s category_ids=%s tags=%s source=%s license_id=%s "
-        "fragment_count=%s thumbnail_path=%s",
+        "content_checksum=%s upload_time=%s sharing=%s category_ids=%s tags=%s "
+        "source=%s license_id=%s fragment_count=%s thumbnail_path=%s",
         filename,
         image_id,
         mime,
-        len(raw),
+        image_size,
+        content_checksum,
         upload_time,
         fields["sharing"],
         fields["category_ids"],

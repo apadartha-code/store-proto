@@ -7,11 +7,11 @@ import io
 from PIL import Image
 
 
-def _ingest(app) -> str:
+def _ingest(app, *, color: tuple[int, int, int] = (4, 4, 4)) -> str:
     from app.services.upload import ingest_image
 
     raw = io.BytesIO()
-    Image.new("RGB", (4, 4)).save(raw, "PNG")
+    Image.new("RGB", (4, 4), color=color).save(raw, "PNG")
     return ingest_image(
         "n.png",
         raw.getvalue(),
@@ -42,8 +42,8 @@ def test_nearest_hash_predecessor(app):
         nearest_hash_for_target,
     )
 
-    id_low = _ingest(app)
-    id_high = _ingest(app)
+    id_low = _ingest(app, color=(1, 2, 3))
+    id_high = _ingest(app, color=(4, 5, 6))
     with db_session() as conn:
         conn.execute("DELETE FROM nicknames")
     add_nickname_hash(id_low, 0x100000)
@@ -63,8 +63,8 @@ def test_nearest_hash_wraps_to_max(app):
         nearest_hash_for_target,
     )
 
-    id_low = _ingest(app)
-    id_high = _ingest(app)
+    id_low = _ingest(app, color=(7, 8, 9))
+    id_high = _ingest(app, color=(10, 11, 12))
     with db_session() as conn:
         conn.execute("DELETE FROM nicknames")
     add_nickname_hash(id_low, 0x100000)
