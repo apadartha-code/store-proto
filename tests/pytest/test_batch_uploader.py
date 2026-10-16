@@ -335,6 +335,67 @@ def test_glob_to_regex_matches_resolved_path(tmp_path):
     assert rx.fullmatch(str(pic.resolve()))
 
 
+_PNG = b"\x89PNG\r\n\x1a\n"
+
+
+def test_normalize_glob_pattern_path_dot_segments():
+    # Features.md §11 — glob paths with . and .. normalize like resolved paths
+    assert upload_batch.normalize_glob_pattern_path("/a/b/../c") == "/a/c"
+    assert upload_batch.normalize_glob_pattern_path("/a/./b//c") == "/a/b/c"
+    assert upload_batch.normalize_glob_pattern_path("../data/*.png") == "../data/*.png"
+    assert upload_batch.normalize_glob_pattern_path("foo/../bar/x.png") == "bar/x.png"
+
+
+def test_glob_to_regex_dotdot_at_start_matches_absolute(tmp_path):
+    data = tmp_path / "data"
+    workspace = tmp_path / "workspace"
+    data.mkdir()
+    workspace.mkdir()
+    pic = data / "img.png"
+    pic.write_bytes(_PNG)
+    glob_pattern = upload_batch.resolve_glob_pattern(
+        "../data/*.png", workspace.resolve()
+    )
+    rx = upload_batch.glob_to_regex(glob_pattern)
+    assert rx.fullmatch(str(pic.resolve()))
+
+
+def test_glob_to_regex_dotdot_in_middle_matches_absolute(tmp_path):
+    pic_dir = tmp_path / "a" / "b"
+    pic_dir.mkdir(parents=True)
+    pic = pic_dir / "shot.png"
+    pic.write_bytes(_PNG)
+    glob_pattern = str(tmp_path / "a" / "nested" / ".." / "b" / "*.png")
+    rx = upload_batch.glob_to_regex(glob_pattern)
+    assert rx.fullmatch(str(pic.resolve()))
+
+
+def test_glob_to_regex_leading_dot_slash_matches_absolute(tmp_path):
+    pic = tmp_path / "images" / "one.png"
+    pic.parent.mkdir(parents=True)
+    pic.write_bytes(_PNG)
+    glob_pattern = upload_batch.resolve_glob_pattern(
+        "./images/*.png", tmp_path.resolve()
+    )
+    rx = upload_batch.glob_to_regex(glob_pattern)
+    assert rx.fullmatch(str(pic.resolve()))
+
+
+def test_iter_glob_matches_relative_dotdot_pattern(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    cwd = tmp_path / "run"
+    data.mkdir()
+    cwd.mkdir()
+    pic = data / "z.png"
+    pic.write_bytes(_PNG)
+    monkeypatch.chdir(cwd)
+    rules = upload_batch.IgnoreRules()
+    found = list(
+        upload_batch.iter_glob_matches("../data/*.png", cwd.resolve(), rules)
+    )
+    assert pic.resolve() in found
+
+
 def test_run_pipeline_paths_list_dry_run(tmp_path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text(

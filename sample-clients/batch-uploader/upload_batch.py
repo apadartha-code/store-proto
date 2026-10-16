@@ -189,8 +189,38 @@ def resolve_glob_pattern(pattern: str, pattern_root: Path) -> str:
     return str((pattern_root / pattern).as_posix())
 
 
+def normalize_glob_pattern_path(glob_pattern: str) -> str:
+    """Collapse ``.`` / ``..`` in a glob path so it matches ``Path.resolve()`` strings."""
+    if not glob_pattern:
+        return glob_pattern
+    stack: list[str] = []
+    for seg in glob_pattern.replace("\\", "/").split("/"):
+        if seg == "":
+            if not stack:
+                stack.append("")
+            continue
+        if seg == ".":
+            continue
+        if seg == "..":
+            if stack and stack[0] == "":
+                if len(stack) > 1:
+                    stack.pop()
+            elif stack:
+                stack.pop()
+            else:
+                stack.append("..")
+            continue
+        stack.append(seg)
+    if not stack:
+        return ""
+    if stack[0] == "":
+        return "/" + "/".join(stack[1:])
+    return "/".join(stack)
+
+
 def glob_to_regex(glob_pattern: str) -> re.Pattern[str]:
     """Convert a glob path to a regex matching the full normalized path string."""
+    glob_pattern = normalize_glob_pattern_path(glob_pattern)
     i = 0
     n = len(glob_pattern)
     parts: list[str] = ["^"]
@@ -215,6 +245,7 @@ def glob_to_regex(glob_pattern: str) -> re.Pattern[str]:
 
 
 def walk_root_for_glob(glob_pattern: str, pattern_root: Path) -> Path:
+    glob_pattern = normalize_glob_pattern_path(glob_pattern)
     parts: list[str] = []
     for part in PurePath(glob_pattern).parts:
         if any(c in part for c in "*?") or part == "**":
