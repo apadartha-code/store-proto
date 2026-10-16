@@ -120,7 +120,7 @@ SHA-256 hex of padded chunk content, size in KB, image FK, index order. Public f
 
 | Route | Purpose |
 |-------|---------|
-| `/image/<id>` | Full image, metadata, edit tags, **categories** (checkboxes with help tooltips), **license** (select + inline help), set **nickname** (not sharing) |
+| `/image/<id>` | Full image, metadata, edit tags, **categories** (checkboxes with help tooltips), **license** (select + inline help), set **nickname** (not sharing). **Save** uses the same acknowledgement overlays as bulk edit: success auto-fades then the page reloads; failure requires **Dismiss**. |
 | `/i/<id>` | Minimal image URL page (link home) |
 | `/i/<id>/content` | Raw bytes for inline display in UI (not the external download API) |
 | `/thumb/<id>` | Thumbnail JPEG for gallery/recall |

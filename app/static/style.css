@@ -201,8 +201,6 @@ button.linkish {
   grid-column: 2;
   padding: 0;
 }
-.bulk-edit-controls label { display: block; margin: 0.75rem 0; }
-.bulk-edit-controls input[type="text"] { width: 100%; }
 .bulk-edit-actions { display: flex; gap: 0.75rem; margin-top: 1rem; align-items: center; }
 
 .bulk-overlay {
@@ -281,8 +279,9 @@ dialog form label { display: block; margin: 0.5rem 0; }
 }
 .detail .full { width: 100%; border-radius: 8px; border: 1px solid var(--border); }
 .meta dl { display: grid; grid-template-columns: 8rem 1fr; gap: 0.25rem 0.5rem; }
-.update-form label { display: block; margin: 0.5rem 0; }
-.update-form input { width: 100%; }
+.metadata-edit-controls label:not(.checkbox-label) { display: block; margin: 0.75rem 0; }
+.metadata-edit-controls input[type="text"] { width: 100%; }
+.metadata-edit-controls select { width: 100%; max-width: 100%; }
 
 .image-only { text-align: center; padding: 1rem; }
 .image-only img { max-width: 100%; height: auto; }

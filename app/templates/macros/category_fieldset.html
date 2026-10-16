@@ -1,0 +1,18 @@
+{% macro category_fieldset(all_categories, legend, name=None, checked=None, checkbox_class='') %}
+<fieldset class="category-fieldset">
+  <legend>{{ legend }}</legend>
+  {% for key, cat in all_categories %}
+  <label class="checkbox-label" title="{{ cat.help }}">
+    <input
+      type="checkbox"
+      {% if name %}name="{{ name }}"{% endif %}
+      {% if checkbox_class %}class="{{ checkbox_class }}"{% endif %}
+      value="{{ key }}"
+      data-testid="category-cb-{{ key }}"
+      {% if checked and key in checked %}checked{% endif %}
+    >
+    {{ key }}
+  </label>
+  {% endfor %}
+</fieldset>
+{% endmacro %}

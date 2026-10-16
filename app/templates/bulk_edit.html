@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from 'macros/category_fieldset.html' import category_fieldset %}
 {% block title %}Bulk edit — Image Store{% endblock %}
 
 {% block content %}
@@ -15,16 +16,8 @@
       <div class="bulk-edit-thumbs" id="bulk-edit-thumbs" data-testid="bulk-edit-thumbs"></div>
     </aside>
 
-    <div class="bulk-edit-controls">
-      <fieldset class="category-fieldset">
-        <legend>Categories (overwrite when at least one is checked)</legend>
-        {% for key, cat in all_categories %}
-        <label class="checkbox-label" title="{{ cat.help }}">
-          <input type="checkbox" class="bulk-category-cb" value="{{ key }}" data-testid="bulk-category-{{ key }}">
-          {{ key }}
-        </label>
-        {% endfor %}
-      </fieldset>
+    <div class="bulk-edit-controls metadata-edit-controls">
+      {{ category_fieldset(all_categories, 'Categories (overwrite when at least one is checked)', checkbox_class='bulk-category-cb') }}
       <label>Tags to add
         <input type="text" id="bulk-tags" data-testid="bulk-tags" placeholder="optional, comma-separated">
       </label>

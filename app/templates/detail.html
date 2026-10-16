@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from 'macros/category_fieldset.html' import category_fieldset %}
 {% block title %}{{ image.original_name }} — Image Store{% endblock %}
 {% block content %}
 <article class="detail">
@@ -19,18 +20,9 @@
       <dt>Image URL</dt><dd><a href="{{ image_page_url }}">{{ image_page_url }}</a></dd>
     </dl>
 
-    <form id="update-form" class="update-form">
+    <form id="update-form" class="update-form metadata-edit-controls">
       <h2>Update metadata</h2>
-      <fieldset class="category-fieldset">
-        <legend>Categories</legend>
-        {% for key, cat in all_categories %}
-        <label class="checkbox-label" title="{{ cat.help }}">
-          <input type="checkbox" name="categories" value="{{ key }}"
-            {% if key in image.categories %}checked{% endif %}>
-          {{ key }}
-        </label>
-        {% endfor %}
-      </fieldset>
+      {{ category_fieldset(all_categories, 'Categories', name='categories', checked=image.categories) }}
       <label>License
         <select name="license" id="detail-license">
           {% for key, lic in all_licenses %}
@@ -47,11 +39,19 @@
         <input type="text" name="nickname" placeholder="optional new nickname">
       </label>
       <button type="submit" data-testid="detail-save">Save</button>
-      <p id="update-status"></p>
     </form>
     <p><a href="{{ url_for('web.landing') }}">← Back to gallery</a></p>
   </section>
 </article>
+
+<div id="detail-overlay-success" class="bulk-overlay bulk-overlay-success hidden" data-testid="detail-overlay-success" role="status">
+  <p id="detail-overlay-success-text"></p>
+</div>
+<div id="detail-overlay-failure" class="bulk-overlay bulk-overlay-failure hidden" data-testid="detail-overlay-failure" role="alert">
+  <p id="detail-overlay-failure-text"></p>
+  <button type="button" id="detail-overlay-failure-dismiss" data-testid="detail-overlay-failure-dismiss">Dismiss</button>
+</div>
+
 <script>
 const licSel = document.getElementById('detail-license');
 const licHelp = document.getElementById('license-help');
@@ -62,6 +62,30 @@ function showLicenseHelp() {
 licSel.addEventListener('change', showLicenseHelp);
 showLicenseHelp();
 
+function showDetailSuccess(message) {
+  const el = document.getElementById('detail-overlay-success');
+  document.getElementById('detail-overlay-success-text').textContent = message;
+  el.classList.remove('hidden');
+  el.classList.add('visible');
+  window.setTimeout(() => {
+    el.classList.remove('visible');
+    el.classList.add('hidden');
+  }, 3200);
+}
+
+function showDetailFailure(message) {
+  const el = document.getElementById('detail-overlay-failure');
+  document.getElementById('detail-overlay-failure-text').textContent = message;
+  el.classList.remove('hidden');
+}
+
+document.getElementById('detail-overlay-failure-dismiss').addEventListener('click', () => {
+  document.getElementById('detail-overlay-failure').classList.add('hidden');
+});
+document.getElementById('detail-overlay-success').addEventListener('click', () => {
+  document.getElementById('detail-overlay-success').classList.add('hidden');
+});
+
 document.getElementById('update-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
@@ -70,19 +94,25 @@ document.getElementById('update-form').addEventListener('submit', async (e) => {
   const body = { tags, categories, license: fd.get('license') };
   const nick = fd.get('nickname');
   if (nick) body.nickname = nick;
-  const res = await fetch('/api/images/{{ image.id }}', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const status = document.getElementById('update-status');
-  if (!res.ok) {
-    const data = await res.json();
-    status.textContent = data.error || 'Update failed';
+  let res;
+  let data = {};
+  try {
+    res = await fetch('/api/images/{{ image.id }}', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    data = await res.json().catch(() => ({}));
+  } catch {
+    showDetailFailure('Update request failed. Check the server logs.');
     return;
   }
-  status.textContent = 'Saved. Reloading…';
-  location.reload();
+  if (!res.ok) {
+    showDetailFailure(data.error || 'Update failed.');
+    return;
+  }
+  showDetailSuccess('Saved.');
+  window.setTimeout(() => location.reload(), 3300);
 });
 </script>
 {% endblock %}

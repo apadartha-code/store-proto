@@ -86,6 +86,7 @@ def test_bulk_edit_page_renders(client):
     assert res.status_code == 200
     assert b"bulk-edit" in res.data
     assert b'data-testid="bulk-submit"' in res.data
+    assert b'data-testid="category-cb-General"' in res.data
 
 
 def test_landing_has_selection_controls(client, app):
