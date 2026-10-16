@@ -90,9 +90,14 @@ def landing():
     page = int(request.args.get("page", 1))
     category = request.args.get("category", "general")
     sharing = request.args.get("sharing", "public_and_shared")
-    random_mode = request.args.get("random") == "1"
     q = request.args.get("q", "").strip()
-    search_mode = bool(q) and not random_mode
+    search_mode = bool(q)
+    random_mode = request.args.get("random") == "1" and not search_mode
+
+    if search_mode and request.args.get("random") == "1":
+        params = request.args.to_dict(flat=True)
+        params.pop("random", None)
+        return redirect(url_for("web.landing", **params))
 
     order = "random" if random_mode else "recent"
     data = list_images(

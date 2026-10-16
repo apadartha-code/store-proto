@@ -121,7 +121,8 @@ def api_list_images():
     page = int(request.args.get("page", 1))
     category = request.args.get("category") or None
     sharing = request.args.get("sharing") or None
-    if request.args.get("random"):
+    q = (request.args.get("q") or "").strip() or None
+    if request.args.get("random") and not q:
         items = random_images(
             limit=Config.PAGE_SIZE,
             category=category or "general",
@@ -130,7 +131,6 @@ def api_list_images():
         return jsonify({"items": items, "page": 1, "pages": 1, "total": len(items)})
 
     tags = request.args.getlist("tag") or None
-    q = request.args.get("q")
     result = list_images(
         page=page,
         per_page=Config.PAGE_SIZE,

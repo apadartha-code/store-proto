@@ -69,3 +69,69 @@ def test_list_images_search(app):
     )
     result = list_images(q="unicorn", category="general", sharing="public_and_shared")
     assert result["total"] >= 1
+
+
+def test_list_images_search_ignores_random_order(app):
+    # Features.md §4 — search uses score ranking, not random SQL order
+    from app.services.query import list_images
+    from app.services.upload import ingest_image
+
+    raw = io.BytesIO()
+    Image.new("RGB", (5, 5)).save(raw, "PNG")
+    ingest_image(
+        "low.png",
+        raw.getvalue(),
+        {
+            "sharing": "public",
+            "categories": ["General"],
+            "source": "s",
+            "tags": ["zzalpha"],
+        },
+    )
+    raw2 = io.BytesIO()
+    Image.new("RGB", (6, 6)).save(raw2, "PNG")
+    better_id = ingest_image(
+        "zzalpha.png",
+        raw2.getvalue(),
+        {
+            "sharing": "public",
+            "categories": ["General"],
+            "source": "s",
+            "tags": ["zzalpha"],
+        },
+    )
+    ranked = list_images(
+        q="zzalpha",
+        category="general",
+        sharing="public_and_shared",
+        order="random",
+    )
+    assert ranked["items"][0]["id"] == better_id
+
+
+def test_landing_hides_latest_random_during_search(client, app):
+    # Features.md §4 — Latest/Random hidden while searching
+    from app.services.query import list_images
+    from app.services.upload import ingest_image
+
+    raw = io.BytesIO()
+    Image.new("RGB", (4, 4)).save(raw, "PNG")
+    ingest_image(
+        "modes.png",
+        raw.getvalue(),
+        {"sharing": "public", "categories": ["General"], "source": "s", "tags": ["modes"]},
+    )
+    assert list_images(q="modes")["total"] >= 1
+    res = client.get("/?q=modes")
+    assert res.status_code == 200
+    assert b'data-testid="mode-latest"' not in res.data
+    assert b'data-testid="mode-random"' not in res.data
+    res2 = client.get("/")
+    assert b'data-testid="mode-latest"' in res2.data
+
+
+def test_landing_strips_random_when_searching(client):
+    res = client.get("/?q=foo&random=1&category=general&sharing=public_and_shared")
+    assert res.status_code == 302
+    assert "random" not in res.location
+    assert "q=foo" in res.location

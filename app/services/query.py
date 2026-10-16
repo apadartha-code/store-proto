@@ -136,7 +136,7 @@ def list_images(
     search_q = (q or "").strip()
 
     with db_session() as conn:
-        if search_q and order != "random":
+        if search_q:
             rows = conn.execute(
                 f"SELECT images.* FROM images WHERE {where}",
                 params,

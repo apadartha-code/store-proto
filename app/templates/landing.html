@@ -45,15 +45,25 @@
     <input type="hidden" name="sharing" id="form-sharing" value="{{ sharing }}">
 
     <div class="search-row">
-      <input
-        type="search"
-        name="q"
-        id="search-q"
-        class="search-input"
-        placeholder="Search names, tags, category, sharing…"
-        value="{{ q }}"
-        autocomplete="off"
-      >
+      <div class="search-input-wrap">
+        <input
+          type="search"
+          name="q"
+          id="search-q"
+          class="search-input"
+          placeholder="Search names, tags, category, sharing…"
+          value="{{ q }}"
+          autocomplete="off"
+        >
+        <button
+          type="button"
+          class="search-clear icon-btn hidden"
+          id="search-clear"
+          data-testid="search-clear"
+          aria-label="Clear search"
+          title="Clear search"
+        >×</button>
+      </div>
       <button type="submit" class="primary" data-testid="search-submit">Search</button>
       <button type="button" class="icon-btn" id="settings-toggle" data-testid="settings-toggle" aria-expanded="false" aria-controls="settings-panel" title="Gallery settings">
         <span aria-hidden="true">⚙</span>
@@ -86,10 +96,12 @@
     </div>
   </form>
 
+  {% if not search_mode %}
   <div class="view-modes">
-    <a class="mode-link {% if not random_mode and not search_mode %}active{% endif %}" href="?page=1&category={{ category }}&sharing={{ sharing }}" id="mode-latest" data-testid="mode-latest">Latest</a>
+    <a class="mode-link {% if not random_mode %}active{% endif %}" href="?page=1&category={{ category }}&sharing={{ sharing }}" id="mode-latest" data-testid="mode-latest">Latest</a>
     <a class="mode-link {% if random_mode %}active{% endif %}" href="?page=1&random=1&category={{ category }}&sharing={{ sharing }}" id="mode-random" data-testid="mode-random">Random</a>
   </div>
+  {% endif %}
 
   <p class="view-caption">
     {% if search_mode %}
@@ -224,16 +236,35 @@ function syncModeLinks() {
   const params = new URLSearchParams(window.location.search);
   const category = params.get('category') || 'general';
   const sharing = params.get('sharing') || 'public_and_shared';
-  const q = params.get('q') || '';
   const latest = document.getElementById('mode-latest');
   const random = document.getElementById('mode-random');
+  if (!latest || !random) return;
   latest.href = `?page=1&category=${encodeURIComponent(category)}&sharing=${encodeURIComponent(sharing)}`;
   random.href = `?page=1&random=1&category=${encodeURIComponent(category)}&sharing=${encodeURIComponent(sharing)}`;
-  if (q) {
-    latest.href += `&q=${encodeURIComponent(q)}`;
-  }
 }
 syncModeLinks();
+
+const searchQ = document.getElementById('search-q');
+const searchClear = document.getElementById('search-clear');
+function syncSearchClearVisible() {
+  if (!searchQ || !searchClear) return;
+  const hasText = Boolean(searchQ.value.trim());
+  searchClear.classList.toggle('hidden', !hasText);
+}
+searchQ.addEventListener('input', syncSearchClearVisible);
+syncSearchClearVisible();
+searchClear.addEventListener('click', () => {
+  searchQ.value = '';
+  syncSearchClearVisible();
+  try {
+    sessionStorage.removeItem('imageStore.gallerySelection');
+  } catch { /* ignore */ }
+  const params = new URLSearchParams(window.location.search);
+  params.delete('q');
+  params.set('page', '1');
+  const qs = params.toString();
+  window.location.href = qs ? `?${qs}` : window.location.pathname;
+});
 
 const dialog = document.getElementById('upload-dialog');
 document.getElementById('upload-open').onclick = () => {

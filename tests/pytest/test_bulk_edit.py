@@ -94,4 +94,5 @@ def test_landing_has_selection_controls(client, app):
     res = client.get("/")
     assert res.status_code == 200
     assert b'data-testid="selection-select-all"' in res.data
+    assert b'data-testid="search-clear"' in res.data
     assert b'gallery-select-cb' in res.data
