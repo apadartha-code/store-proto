@@ -12,11 +12,24 @@ from app.db import db_session
 from app.services.categories import resolve_category_keys, set_image_categories
 from app.services.dictionary import get_dictionary
 from app.services.errors import UploadValidationError
-from app.services.fragments import sha256_hex, split_into_fragments
+from app.services.fragments import (
+    relocate_fragments_for_sharing_change,
+    sha256_hex,
+    split_into_fragments,
+)
 from app.services.nickname import add_random_default_nickname
 from app.services.thumbnail import schedule_thumbnail, thumbnail_path
 
 logger = logging.getLogger(__name__)
+
+_SHARING_RELAXATION_RANK = {"private": 0, "shared": 1, "public": 2}
+
+
+def sharing_relaxation_rank(sharing: str) -> int:
+    key = sharing.lower()
+    if key not in _SHARING_RELAXATION_RANK:
+        raise UploadValidationError("Invalid sharing value")
+    return _SHARING_RELAXATION_RANK[key]
 
 
 def validate_batch_limits(file_count: int, total_bytes: int) -> None:
@@ -121,14 +134,60 @@ def ingest_image(
     content_checksum = sha256_hex(raw)
 
     with db_session() as conn:
-        duplicate = conn.execute(
+        existing = conn.execute(
             """
-            SELECT id FROM images
+            SELECT id, sharing FROM images
             WHERE content_checksum = ? AND image_size = ?
             """,
             (content_checksum, image_size),
         ).fetchone()
-        if duplicate:
+        if existing:
+            old_sharing = existing["sharing"]
+            new_sharing = fields["sharing"]
+            if sharing_relaxation_rank(new_sharing) > sharing_relaxation_rank(
+                old_sharing
+            ):
+                image_id = existing["id"]
+                frag_rows = conn.execute(
+                    """
+                    SELECT fragment_id FROM fragments
+                    WHERE image_id = ?
+                    ORDER BY fragment_index ASC
+                    """,
+                    (image_id,),
+                ).fetchall()
+                fragment_ids = [str(r["fragment_id"]) for r in frag_rows]
+                try:
+                    relocate_fragments_for_sharing_change(
+                        fragment_ids, old_sharing, new_sharing
+                    )
+                except FileNotFoundError:
+                    logger.warning(
+                        "Fragment relocate failed for image_id=%s; "
+                        "re-splitting for sharing=%s",
+                        image_id,
+                        new_sharing,
+                        exc_info=True,
+                    )
+                    split_into_fragments(raw, new_sharing)
+                conn.execute(
+                    """
+                    UPDATE images
+                    SET sharing = ?, license_id = ?
+                    WHERE id = ?
+                    """,
+                    (new_sharing, fields["license_id"], image_id),
+                )
+                logger.info(
+                    "Relaxed sharing for duplicate image_id=%s %s -> %s "
+                    "license_id=%s (original_name=%s unchanged)",
+                    image_id,
+                    old_sharing,
+                    new_sharing,
+                    fields["license_id"],
+                    filename,
+                )
+                return image_id
             msg = "Duplicate image content"
             logger.error("Upload rejected for %s: %s", filename, msg)
             raise UploadValidationError(msg)

@@ -53,7 +53,7 @@ When upload metadata omits `license`, the app picks the lowest-id license valid 
 
 ### Image records
 
-UUID, original name, upload time, MIME, **image_size** (bytes), **content_checksum** (SHA-256 hex of raw file bytes), **sharing** (`public` | `shared` | `private`), **license_id** (dictionary), optional tags (JSON list), optional **source** (required for public at upload). **`(content_checksum, image_size)` is unique** — duplicate uploads of the same bytes are rejected even when `original_name` differs.
+UUID, original name, upload time, MIME, **image_size** (bytes), **content_checksum** (SHA-256 hex of raw file bytes), **sharing** (`public` | `shared` | `private`), **license_id** (dictionary), optional tags (JSON list), optional **source** (required for public at upload). **`(content_checksum, image_size)` is unique** — duplicate bytes are rejected when sharing is unchanged or tightened (`private` → `shared` → `public` is increasing relaxation). A duplicate with **more relaxed** sharing updates **sharing** and **license** only; other metadata and `original_name` stay as-is; fragments move to `public/` when relaxing to **public**.
 
 - **Sharing** is set at upload and **cannot** be changed later in UI or API.
 - **Categories**: one-to-many via `image_categories (image_id, category_id)`. Every category id must exist in `enums.yml`. Gallery category filter matches images that include that category.
@@ -94,7 +94,7 @@ SHA-256 hex of padded chunk content, size in KB, image FK, index order. Public f
 
 ### Pipeline
 
-- Image split into fixed-size fragments (`FRAGMENT_SIZE_KB`, last chunk zero-padded); UUID assigned; **content_checksum** stored and deduplicated with **image_size**.
+- Image split into fixed-size fragments (`FRAGMENT_SIZE_KB`, last chunk zero-padded); UUID assigned; **content_checksum** stored and deduplicated with **image_size**; duplicate relax relocates existing fragment files to `public/` when needed (`relocate_fragments_for_sharing_change`); if a fragment file is missing, ingest falls back to `split_into_fragments` for the new sharing.
 - On upload: **random 24-bit nickname hash** inserted (collisions allowed).
 - Background thumbnail generation; after at least one thumbnail, localhost `POST /api/backup` may run.
 - Batch upload: multiple files share one metadata form (`POST /api/upload`, multipart field `files`).

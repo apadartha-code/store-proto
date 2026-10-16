@@ -14,6 +14,27 @@ def _png_bytes() -> bytes:
     return buf.getvalue()
 
 
+def test_relocate_fragments_for_sharing_change_moves_to_public(app):
+    # Features.md §2 — duplicate relax shared/private → public
+    from app.config import Config
+    from app.services.fragments import relocate_fragments_for_sharing_change, split_into_fragments
+
+    raw = _png_bytes()
+    parts = split_into_fragments(raw, "private")
+    frag_ids = [fid for fid, _ in parts]
+    for fid in frag_ids:
+        assert (Config.FRAGMENTS_USER_DIR / fid).is_file()
+
+    relocate_fragments_for_sharing_change(frag_ids, "private", "public")
+    for fid in frag_ids:
+        assert (Config.FRAGMENTS_PUBLIC_DIR / fid).is_file()
+        assert not (Config.FRAGMENTS_USER_DIR / fid).exists()
+
+    relocate_fragments_for_sharing_change(frag_ids, "private", "shared")
+    for fid in frag_ids:
+        assert (Config.FRAGMENTS_PUBLIC_DIR / fid).is_file()
+
+
 def test_fragment_roundtrip(app):
     from app.config import Config
     from app.services.fragments import split_into_fragments

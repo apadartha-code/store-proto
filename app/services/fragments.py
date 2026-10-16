@@ -4,6 +4,7 @@ import hashlib
 import logging
 import shutil
 from pathlib import Path
+from typing import Sequence
 
 from app.config import Config
 from app.db import db_session
@@ -48,6 +49,32 @@ def store_fragment(data: bytes, sharing: str) -> str:
             logger.debug("Fragment already in user store: %s", fragment_id)
 
     return fragment_id
+
+
+def relocate_fragments_for_sharing_change(
+    fragment_ids: Sequence[str],
+    old_sharing: str,
+    new_sharing: str,
+) -> None:
+    """
+    Move existing fragment files when relaxing sharing to public.
+    private/shared → public moves user/ → public/; other changes need no file moves.
+    """
+    old = old_sharing.lower()
+    new = new_sharing.lower()
+    if new != "public" or old == "public":
+        return
+    for fragment_id in fragment_ids:
+        public_path = _fragment_path(Config.FRAGMENTS_PUBLIC_DIR, fragment_id)
+        if public_path.exists():
+            logger.debug("Fragment already in public store: %s", fragment_id)
+            continue
+        user_path = _fragment_path(Config.FRAGMENTS_USER_DIR, fragment_id)
+        if user_path.exists():
+            shutil.move(str(user_path), str(public_path))
+            logger.debug("Moved fragment to public store: %s", fragment_id)
+            continue
+        raise FileNotFoundError(f"Fragment missing for relocation: {fragment_id}")
 
 
 def split_into_fragments(raw: bytes, sharing: str) -> list[tuple[str, int]]:
