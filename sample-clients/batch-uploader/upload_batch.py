@@ -4,20 +4,23 @@
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import mimetypes
 import os
+import queue
 import re
+import signal
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path, PurePath
-from typing import Any, Iterable, Optional, Sequence, TextIO
+from typing import Any, Callable, Iterable, Iterator, Optional, Sequence, TextIO
 
 _LIMIT_KEYS = (
     "MAX_UPLOAD_KB",
@@ -31,6 +34,9 @@ _IMAGE_MAGIC = (
     (b"GIF87a", "image/gif"),
     (b"GIF89a", "image/gif"),
 )
+
+_QUEUE_SENTINEL = object()
+DEFAULT_UPLOAD_TIMEOUT_SEC = 30.0
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,35 @@ class BatchPlan:
     batches: list[list[PreparedFile]]
     rejected_size: list[tuple[Path, str]]
     skipped_mime: list[Path]
+
+
+@dataclass
+class IgnoreRules:
+    """Paths and directories to skip (-I); directories prune os.walk descent."""
+
+    file_paths: set[Path] = field(default_factory=set)
+    dir_paths: set[Path] = field(default_factory=set)
+
+    def add(self, path: Path) -> None:
+        resolved = path.expanduser().resolve()
+        if resolved.is_dir():
+            self.dir_paths.add(resolved)
+        else:
+            self.file_paths.add(resolved)
+
+    def merge(self, other: IgnoreRules) -> None:
+        self.file_paths |= other.file_paths
+        self.dir_paths |= other.dir_paths
+
+
+def _parse_positive_float(name: str, raw: str) -> float:
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a positive number, got: {raw!r}")
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive number, got: {value}")
+    return value
 
 
 def _parse_positive_int(name: str, raw: str) -> int:
@@ -154,61 +189,166 @@ def resolve_glob_pattern(pattern: str, pattern_root: Path) -> str:
     return str((pattern_root / pattern).as_posix())
 
 
-def _expand_pattern(pattern: str, pattern_root: Path) -> list[Path]:
+def glob_to_regex(glob_pattern: str) -> re.Pattern[str]:
+    """Convert a glob path to a regex matching the full normalized path string."""
+    i = 0
+    n = len(glob_pattern)
+    parts: list[str] = ["^"]
+    while i < n:
+        if glob_pattern[i : i + 2] == "**":
+            parts.append(".*")
+            i += 2
+            if i < n and glob_pattern[i] == "/":
+                parts.append("/?")
+                i += 1
+            continue
+        ch = glob_pattern[i]
+        if ch == "*":
+            parts.append("[^/]*")
+        elif ch == "?":
+            parts.append("[^/]")
+        else:
+            parts.append(re.escape(ch))
+        i += 1
+    parts.append("$")
+    return re.compile("".join(parts))
+
+
+def walk_root_for_glob(glob_pattern: str, pattern_root: Path) -> Path:
+    parts: list[str] = []
+    for part in PurePath(glob_pattern).parts:
+        if any(c in part for c in "*?") or part == "**":
+            break
+        parts.append(part)
+    if not parts:
+        return pattern_root.resolve()
+    candidate = Path(*parts)
+    if not candidate.is_absolute():
+        candidate = pattern_root / candidate
+    return candidate.resolve()
+
+
+def path_is_ignored(path: Path, rules: IgnoreRules) -> bool:
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return False
+    if resolved in rules.file_paths:
+        return True
+    for directory in rules.dir_paths:
+        try:
+            resolved.relative_to(directory)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def dir_is_ignored(dir_path: Path, rules: IgnoreRules) -> bool:
+    try:
+        resolved = dir_path.expanduser().resolve()
+    except OSError:
+        return True
+    if resolved in rules.dir_paths:
+        return True
+    for directory in rules.dir_paths:
+        try:
+            resolved.relative_to(directory)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def iter_glob_matches(
+    pattern: str,
+    pattern_root: Path,
+    rules: IgnoreRules,
+    on_dir_complete: Optional[Callable[[Path], None]] = None,
+    interrupt: Optional[threading.Event] = None,
+) -> Iterator[Path]:
+    """Walk the filesystem and yield files matching a glob or re: pattern."""
     pattern = pattern.strip()
     if not pattern:
-        return []
+        return
     if pattern.startswith("re:"):
         regex = re.compile(pattern[3:])
-        root = pattern_root
-        found: list[Path] = []
-        for dirpath, _, filenames in os.walk(root):
-            for name in filenames:
-                p = Path(dirpath) / name
-                try:
-                    resolved = p.resolve()
-                except OSError:
-                    continue
-                if regex.search(str(resolved)) or regex.search(str(p)):
-                    found.append(resolved)
-        return found
-    glob_pattern = resolve_glob_pattern(pattern, pattern_root)
-    matches = [Path(p) for p in glob.iglob(glob_pattern, recursive=True)]
-    return [p.resolve() for p in matches if p.is_file()]
+        root = pattern_root.resolve()
+    else:
+        glob_pattern = resolve_glob_pattern(pattern, pattern_root)
+        regex = glob_to_regex(glob_pattern)
+        root = walk_root_for_glob(glob_pattern, pattern_root)
+
+    if not root.is_dir():
+        return
+
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+        if interrupt is not None and interrupt.is_set():
+            return
+        current = Path(dirpath)
+        if dir_is_ignored(current, rules):
+            dirnames[:] = []
+            continue
+
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if not dir_is_ignored(current / d, rules)
+        ]
+
+        for name in filenames:
+            if interrupt is not None and interrupt.is_set():
+                return
+            p = (current / name).resolve()
+            if path_is_ignored(p, rules):
+                continue
+            path_str = str(p)
+            if regex.fullmatch(path_str) or regex.search(path_str):
+                if p.is_file():
+                    yield p
+
+        if on_dir_complete is not None:
+            on_dir_complete(current.resolve())
 
 
 def collect_paths_from_patterns(
     patterns: Sequence[str],
     *,
     pattern_root: Optional[Path] = None,
+    rules: Optional[IgnoreRules] = None,
 ) -> list[Path]:
     root = (pattern_root or Path.cwd()).resolve()
+    ignore = rules or IgnoreRules()
     seen: set[Path] = set()
     ordered: list[Path] = []
     for pattern in patterns:
-        for path in _expand_pattern(pattern, root):
+        for path in iter_glob_matches(pattern, root, ignore):
             if path not in seen:
                 seen.add(path)
                 ordered.append(path)
     return ordered
 
 
-def read_pattern_lines(stream: TextIO) -> list[str]:
-    return [line.strip() for line in stream if line.strip() and not line.strip().startswith("#")]
+def read_path_lines(stream: TextIO) -> list[str]:
+    return [
+        line.strip()
+        for line in stream
+        if line.strip() and not line.strip().startswith("#")
+    ]
 
 
-def load_ignore_paths(ignore_file: Optional[Path]) -> set[Path]:
+def load_ignore_rules(ignore_file: Optional[Path]) -> IgnoreRules:
+    rules = IgnoreRules()
     if ignore_file is None:
-        return set()
+        return rules
     if not ignore_file.is_file():
         raise FileNotFoundError(f"Ignore file not found: {ignore_file}")
-    out: set[Path] = set()
     for line in ignore_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        out.add(Path(line).expanduser().resolve())
-    return out
+        rules.add(Path(line))
+    return rules
 
 
 def prepare_files(
@@ -216,13 +356,15 @@ def prepare_files(
     limits: UploadLimits,
     ignore: set[Path],
 ) -> BatchPlan:
+    """Legacy synchronous planner (tests); ignore is a set of file paths only."""
+    rules = IgnoreRules(file_paths=set(ignore))
     rejected_size: list[tuple[Path, str]] = []
     skipped_mime: list[Path] = []
     eligible: list[PreparedFile] = []
 
     for path in paths:
         resolved = path.expanduser().resolve()
-        if resolved in ignore:
+        if path_is_ignored(resolved, rules):
             continue
         if not resolved.is_file():
             continue
@@ -245,31 +387,72 @@ def prepare_files(
             continue
         eligible.append(PreparedFile(path=resolved, size=size, mime=mime))
 
-    eligible.sort(key=lambda item: item.size)
-    batches: list[list[PreparedFile]] = []
-    current: list[PreparedFile] = []
-    current_bytes = 0
-
-    for item in eligible:
-        if item.size > limits.max_file_bytes:
-            continue
-        if current and (
-            len(current) >= limits.max_batch_files
-            or current_bytes + item.size > limits.max_batch_bytes
-        ):
-            batches.append(current)
-            current = []
-            current_bytes = 0
-        current.append(item)
-        current_bytes += item.size
-    if current:
-        batches.append(current)
+    batches, residual = pack_batches(eligible, limits)
+    if residual:
+        batches.append(residual)
 
     return BatchPlan(
         batches=batches,
         rejected_size=rejected_size,
         skipped_mime=skipped_mime,
     )
+
+
+def pack_batches(
+    items: Sequence[PreparedFile],
+    limits: UploadLimits,
+) -> tuple[list[list[PreparedFile]], list[PreparedFile]]:
+    """Sort by size and split into full batches; trailing partial batch is residual."""
+    sorted_items = sorted(items, key=lambda item: item.size)
+    complete: list[list[PreparedFile]] = []
+    current: list[PreparedFile] = []
+    current_bytes = 0
+
+    for item in sorted_items:
+        if current and (
+            len(current) >= limits.max_batch_files
+            or current_bytes + item.size > limits.max_batch_bytes
+        ):
+            complete.append(current)
+            current = []
+            current_bytes = 0
+        current.append(item)
+        current_bytes += item.size
+
+    return complete, current
+
+
+def residual_should_wait(
+    residual: Sequence[PreparedFile],
+    limits: UploadLimits,
+    more_items_expected: bool,
+) -> bool:
+    if not residual or not more_items_expected:
+        return False
+    total_bytes = sum(item.size for item in residual)
+    return (
+        len(residual) < limits.max_batch_files
+        and total_bytes < limits.max_batch_bytes
+    )
+
+
+def try_prepare_file(
+    path: Path,
+    limits: UploadLimits,
+) -> tuple[Optional[PreparedFile], Optional[str]]:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return None, f"cannot read file: {exc}"
+    if size > limits.max_file_bytes:
+        return (
+            None,
+            f"exceeds per-file limit {limits.max_file_bytes} bytes (size {size})",
+        )
+    mime = detect_image_mime(path)
+    if not mime:
+        return None, "not an image"
+    return PreparedFile(path=path, size=size, mime=mime), None
 
 
 def default_log_path() -> Path:
@@ -281,14 +464,28 @@ class OperationLogger:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._file = path.open("a", encoding="utf-8")
+        self._lock = threading.Lock()
 
     def log(self, message: str) -> None:
         line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {message}\n"
-        self._file.write(line)
-        self._file.flush()
+        with self._lock:
+            self._file.write(line)
+            self._file.flush()
 
     def close(self) -> None:
         self._file.close()
+
+
+@contextmanager
+def block_sigint_in_thread():
+    if not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
 
 
 def _encode_multipart(
@@ -344,7 +541,7 @@ def upload_batch(
     api_url: str,
     batch: Sequence[PreparedFile],
     metadata: dict[str, Any],
-    timeout: float = 300.0,
+    timeout: float = DEFAULT_UPLOAD_TIMEOUT_SEC,
 ) -> list[FileUploadOutcome]:
     file_payloads: list[tuple[str, str, bytes]] = []
     for item in batch:
@@ -436,12 +633,22 @@ def _outcomes_from_errors(
 
 def _progress_line(
     processed_files: int,
-    total_files: int,
     processed_bytes: int,
-    total_bytes: int,
+    total_files: Optional[int],
+    total_bytes: Optional[int],
 ) -> str:
-    pct = (100.0 * processed_bytes / total_bytes) if total_bytes else 100.0
-    return f" [{processed_files}/{total_files} files, {pct:.1f}% bytes]"
+    if total_files and total_bytes:
+        pct = (100.0 * processed_bytes / total_bytes) if total_bytes else 100.0
+        return f" [{processed_files}/{total_files} files, {pct:.1f}% bytes]"
+    return f" [{processed_files} files processed]"
+
+
+def _restart_hint(log_path: Path) -> str:
+    return (
+        "To resume after interruption, build a paths list for -F/--paths-list "
+        "(ENQUEUE/LIST lines) and an ignore path list for -I/--ignore-file "
+        f"(SCAN_DIR_COMPLETE and SKIP lines) from the log file: {log_path}"
+    )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -453,12 +660,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Pattern sources (exactly one required):\n"
-            "  -g/--glob may be repeated; -F/--patterns-file lists one pattern per line\n"
-            "  (use -F - for stdin; not combinable with -g).\n"
-            "Patterns are glob paths (recursive with **). Relative patterns use the current\n"
-            "working directory. Absolute paths (leading /) are used as-is. Prefix re: for regex\n"
-            "(walks under cwd).\n"
+            "Input sources (at least one required):\n"
+            "  -F/--paths-list — one image file path per line (use -F - for stdin);\n"
+            "  -g/--glob — glob or re: pattern for directory scan (repeatable).\n"
+            "  With both, -F paths are uploaded first; those paths are ignored during -g scan.\n"
+            "  Folder scan runs only when -g is given.\n"
             "\n"
             "Upload limits (all required, positive integers):\n"
             "  MAX_UPLOAD_KB, MAX_UPLOAD_TOTAL_BYTES, MAX_UPLOAD_FILE_COUNT\n"
@@ -467,8 +673,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  %(prog)s -g 'photos/**/*.jpg' --sharing public --license 'Public Domain' "
             "--source 'me'\n"
-            "  %(prog)s -F patterns.txt --ignore-file uploaded.txt --brief "
-            "--host 192.168.1.10:5000\n"
+            "  %(prog)s -F paths.txt -I uploaded.txt --brief --host 192.168.1.10:5000\n"
         ),
     )
     parser.add_argument(
@@ -484,21 +689,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="PATTERN",
-        help="Glob or re: regex pattern for image paths (repeatable)",
+        help="Glob or re: regex pattern; scans directories (repeatable)",
     )
     parser.add_argument(
         "-F",
-        "--patterns-file",
+        "--paths-list",
         type=Path,
         metavar="FILE",
-        help="Pattern list file, or - to read patterns from stdin (one per line)",
+        help="Image paths file, or - to read paths from stdin (one per line)",
     )
     parser.add_argument(
         "-I",
         "--ignore-file",
         type=Path,
         metavar="FILE",
-        help="Text file of absolute/relative paths to skip",
+        help="Paths or directories to skip (one per line)",
     )
     parser.add_argument(
         "--env-file",
@@ -530,6 +735,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Only print final statistics (no per-file lines or progress)",
     )
     parser.add_argument(
+        "--upload-timeout",
+        type=float,
+        default=DEFAULT_UPLOAD_TIMEOUT_SEC,
+        metavar="SEC",
+        help=(
+            "HTTP response timeout per POST /api/upload batch "
+            f"(default: {DEFAULT_UPLOAD_TIMEOUT_SEC:g} seconds)"
+        ),
+    )
+    parser.add_argument(
         "--sharing",
         required=True,
         choices=("public", "shared", "private"),
@@ -539,7 +754,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--license",
         required=True,
         metavar="NAME",
-        help="License dictionary key for all uploads (required)",
+        help="License dictionary key (see enums.yml in the repo for valid values)",
     )
     parser.add_argument(
         "--source",
@@ -551,7 +766,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         nargs="+",
         default=["General"],
         metavar="CAT",
-        help="Category keys (default: General)",
+        help="Category keys (valid values in enums.yml; default: General)",
     )
     parser.add_argument(
         "--tags",
@@ -561,42 +776,362 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def patterns_file_is_stdin(path: Optional[Path]) -> bool:
+def paths_list_is_stdin(path: Optional[Path]) -> bool:
     return path is not None and str(path) == "-"
 
 
-def read_patterns_from_stdin() -> list[str]:
+def read_paths_list_from_stdin() -> list[str]:
     if sys.stdin.isatty():
         raise SystemExit("error: -F - requires piped stdin (stdin is a TTY)")
-    return read_pattern_lines(sys.stdin)
+    return read_path_lines(sys.stdin)
 
 
-def _gather_patterns(args: argparse.Namespace) -> list[str]:
-    cli_patterns = list(args.globs)
-    if patterns_file_is_stdin(args.patterns_file) and cli_patterns:
-        raise SystemExit("error: -F - cannot be combined with -g/--glob")
+def _gather_paths_list(args: argparse.Namespace) -> list[str]:
+    if paths_list_is_stdin(args.paths_list):
+        return read_paths_list_from_stdin()
+    if args.paths_list is None:
+        return []
+    if not args.paths_list.is_file():
+        raise SystemExit(f"error: paths list file not found: {args.paths_list}")
+    return read_path_lines(
+        args.paths_list.read_text(encoding="utf-8").splitlines()
+    )
 
-    patterns: list[str] = []
-    if patterns_file_is_stdin(args.patterns_file):
-        patterns.extend(read_patterns_from_stdin())
-    else:
-        patterns.extend(cli_patterns)
-        if args.patterns_file is not None:
-            if not args.patterns_file.is_file():
-                raise SystemExit(
-                    f"error: patterns file not found: {args.patterns_file}"
+
+def _enqueue_path(
+    path: Path,
+    limits: UploadLimits,
+    rules: IgnoreRules,
+    work_queue: queue.Queue,
+    logger: OperationLogger,
+    seen: set[Path],
+) -> None:
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError as exc:
+        logger.log(f"SKIP path {path}: {exc}")
+        return
+    if resolved in seen:
+        return
+    if path_is_ignored(resolved, rules):
+        logger.log(f"SKIP ignore {resolved}")
+        return
+    if not resolved.is_file():
+        logger.log(f"SKIP not-file {resolved}")
+        return
+    prepared, reason = try_prepare_file(resolved, limits)
+    if prepared is None:
+        if reason == "not an image":
+            logger.log(f"SKIP mime {resolved}")
+        else:
+            logger.log(f"REJECT size {resolved}: {reason}")
+        return
+    seen.add(resolved)
+    work_queue.put(prepared)
+    logger.log(f"ENQUEUE {resolved} size={prepared.size}")
+
+
+def _producer(
+    *,
+    paths_list: Sequence[str],
+    globs: Sequence[str],
+    limits: UploadLimits,
+    ignore_rules: IgnoreRules,
+    pattern_root: Path,
+    work_queue: queue.Queue,
+    logger: OperationLogger,
+    seen: set[Path],
+    scan_ignore: IgnoreRules,
+    interrupt: threading.Event,
+) -> None:
+    for raw in paths_list:
+        if interrupt.is_set():
+            break
+        logger.log(f"LIST {raw}")
+        try:
+            path = Path(raw).expanduser()
+        except Exception as exc:
+            logger.log(f"SKIP path {raw}: {exc}")
+            continue
+        _enqueue_path(path, limits, ignore_rules, work_queue, logger, seen)
+        try:
+            resolved = path.resolve()
+            if resolved.is_file():
+                scan_ignore.file_paths.add(resolved)
+        except OSError:
+            pass
+
+    if globs and not interrupt.is_set():
+        def on_dir_complete(directory: Path) -> None:
+            if not dir_is_ignored(directory, ignore_rules):
+                logger.log(f"SCAN_DIR_COMPLETE {directory}")
+
+        for pattern in globs:
+            if interrupt.is_set():
+                break
+            logger.log(f"GLOB {pattern}")
+            for file_path in iter_glob_matches(
+                pattern,
+                pattern_root,
+                scan_ignore,
+                on_dir_complete=on_dir_complete,
+                interrupt=interrupt,
+            ):
+                if interrupt.is_set():
+                    break
+                _enqueue_path(
+                    file_path,
+                    limits,
+                    ignore_rules,
+                    work_queue,
+                    logger,
+                    seen,
                 )
-            patterns.extend(
-                read_pattern_lines(
-                    args.patterns_file.read_text(encoding="utf-8").splitlines()
+
+
+def _upload_one_batch(
+    batch: Sequence[PreparedFile],
+    *,
+    api_url: str,
+    metadata: dict[str, Any],
+    upload_timeout: float,
+    dry_run: bool,
+    brief: bool,
+    logger: OperationLogger,
+    stats: dict[str, int],
+) -> None:
+    if dry_run:
+        batch_bytes = sum(x.size for x in batch)
+        logger.log(f"DRY_BATCH size={len(batch)} bytes={batch_bytes}")
+        for item in batch:
+            stats["processed"] += 1
+            stats["success"] += 1
+            stats["bytes"] += item.size
+            logger.log(f"OK {item.path}")
+        return
+
+    logger.log(f"BATCH size={len(batch)}")
+    if not brief:
+        print(f"Uploading batch ({len(batch)} file(s))…", file=sys.stderr)
+    with block_sigint_in_thread():
+        outcomes = upload_batch(
+            api_url, batch, metadata, timeout=upload_timeout
+        )
+    for outcome in outcomes:
+        item = outcome.item
+        stats["processed"] += 1
+        progress = _progress_line(stats["processed"], stats["bytes"], None, None)
+        if outcome.ok:
+            stats["success"] += 1
+            stats["bytes"] += item.size
+            logger.log(f"OK {item.path}")
+            if not brief:
+                print(f"{item.path}{progress}")
+        else:
+            stats["fail"] += 1
+            logger.log(f"FAIL {item.path}: {outcome.message}")
+            if not brief:
+                print(
+                    f"FAIL {item.path}{progress}: {outcome.message}",
+                    file=sys.stderr,
                 )
+
+
+def _drain_work_queue(
+    work_queue: queue.Queue,
+    max_items: int,
+    producer_done: threading.Event,
+) -> list[PreparedFile]:
+    items: list[PreparedFile] = []
+    while len(items) < max_items:
+        if producer_done.is_set() and work_queue.empty():
+            break
+        try:
+            item = work_queue.get(timeout=0.25)
+        except queue.Empty:
+            if producer_done.is_set():
+                break
+            continue
+        if item is _QUEUE_SENTINEL:
+            continue
+        items.append(item)
+    while producer_done.is_set():
+        try:
+            item = work_queue.get_nowait()
+        except queue.Empty:
+            break
+        if item is _QUEUE_SENTINEL:
+            continue
+        items.append(item)
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def _consumer_upload_batches(
+    *,
+    work_queue: queue.Queue,
+    limits: UploadLimits,
+    logger: OperationLogger,
+    api_url: str,
+    metadata: dict[str, Any],
+    upload_timeout: float,
+    dry_run: bool,
+    brief: bool,
+    interrupt: threading.Event,
+    stats: dict[str, int],
+    producer_done: threading.Event,
+) -> None:
+    residual: list[PreparedFile] = []
+    dequeue_limit = 10 * limits.max_batch_files
+
+    while True:
+        if producer_done.is_set() and work_queue.empty() and not residual:
+            break
+        if interrupt.is_set() and producer_done.is_set() and work_queue.empty():
+            if residual:
+                _upload_one_batch(
+                    residual,
+                    api_url=api_url,
+                    metadata=metadata,
+                    upload_timeout=upload_timeout,
+                    dry_run=dry_run,
+                    brief=brief,
+                    logger=logger,
+                    stats=stats,
+                )
+                residual = []
+            break
+
+        if (
+            work_queue.qsize() < dequeue_limit
+            and not producer_done.is_set()
+        ):
+            time.sleep(0.05)
+            continue
+
+        chunk = _drain_work_queue(work_queue, dequeue_limit, producer_done)
+        if not chunk:
+            if producer_done.is_set() and residual:
+                _upload_one_batch(
+                    residual,
+                    api_url=api_url,
+                    metadata=metadata,
+                    upload_timeout=upload_timeout,
+                    dry_run=dry_run,
+                    brief=brief,
+                    logger=logger,
+                    stats=stats,
+                )
+                residual = []
+            break
+
+        to_pack = residual + chunk
+        residual = []
+        batches, trailing = pack_batches(to_pack, limits)
+        more_expected = not producer_done.is_set() or not work_queue.empty()
+        if residual_should_wait(trailing, limits, more_expected):
+            residual = trailing
+            upload_batches = batches
+        else:
+            if trailing:
+                batches.append(trailing)
+            upload_batches = batches
+
+        for batch in upload_batches:
+            if interrupt.is_set():
+                break
+            _upload_one_batch(
+                batch,
+                api_url=api_url,
+                metadata=metadata,
+                upload_timeout=upload_timeout,
+                dry_run=dry_run,
+                brief=brief,
+                logger=logger,
+                stats=stats,
             )
 
-    if not patterns:
-        raise SystemExit(
-            "error: no path patterns; use -g/--glob or -F/--patterns-file (- for stdin)"
-        )
-    return patterns
+        if producer_done.is_set() and work_queue.empty() and residual:
+            _upload_one_batch(
+                residual,
+                api_url=api_url,
+                metadata=metadata,
+                upload_timeout=upload_timeout,
+                dry_run=dry_run,
+                brief=brief,
+                logger=logger,
+                stats=stats,
+            )
+            residual = []
+
+        if producer_done.is_set() and work_queue.empty() and not residual:
+            break
+
+
+def run_upload_pipeline(
+    *,
+    paths_list: Sequence[str],
+    globs: Sequence[str],
+    limits: UploadLimits,
+    ignore_rules: IgnoreRules,
+    logger: OperationLogger,
+    api_url: str,
+    metadata: dict[str, Any],
+    dry_run: bool,
+    brief: bool,
+    interrupt: threading.Event,
+    upload_timeout: float = DEFAULT_UPLOAD_TIMEOUT_SEC,
+) -> dict[str, int]:
+    work_queue: queue.Queue = queue.Queue()
+    producer_done = threading.Event()
+    seen: set[Path] = set()
+    scan_ignore = IgnoreRules()
+    scan_ignore.merge(ignore_rules)
+
+    stats = {"processed": 0, "success": 0, "fail": 0, "bytes": 0, "enqueued": 0}
+
+    def producer_wrapper() -> None:
+        try:
+            _producer(
+                paths_list=paths_list,
+                globs=globs,
+                limits=limits,
+                ignore_rules=ignore_rules,
+                pattern_root=Path.cwd().resolve(),
+                work_queue=work_queue,
+                logger=logger,
+                seen=seen,
+                scan_ignore=scan_ignore,
+                interrupt=interrupt,
+            )
+        finally:
+            work_queue.put(_QUEUE_SENTINEL)
+            producer_done.set()
+
+    producer_thread = threading.Thread(target=producer_wrapper, name="producer")
+    consumer_thread = threading.Thread(
+        target=_consumer_upload_batches,
+        kwargs={
+            "work_queue": work_queue,
+            "limits": limits,
+            "logger": logger,
+            "api_url": api_url,
+            "metadata": metadata,
+            "upload_timeout": upload_timeout,
+            "dry_run": dry_run,
+            "brief": brief,
+            "interrupt": interrupt,
+            "stats": stats,
+            "producer_done": producer_done,
+        },
+        name="consumer",
+    )
+    producer_thread.start()
+    consumer_thread.start()
+    producer_thread.join()
+    consumer_thread.join()
+    return stats
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -615,60 +1150,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    patterns = _gather_patterns(args)
+    paths_list = _gather_paths_list(args)
+    globs = list(args.globs)
+    if not paths_list and not globs:
+        raise SystemExit(
+            "error: no inputs; use -F/--paths-list and/or -g/--glob"
+        )
+
     try:
-        ignore = load_ignore_paths(args.ignore_file)
+        ignore_rules = load_ignore_rules(args.ignore_file)
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    paths = collect_paths_from_patterns(patterns)
-    plan = prepare_files(paths, limits, ignore)
-
-    for path, reason in plan.rejected_size:
-        try:
-            size = path.stat().st_size
-        except OSError:
-            size = -1
-        print(
-            f"REJECT {path}: {reason}; limit={limits.max_file_bytes} bytes size={size}",
-            file=sys.stderr,
+    try:
+        upload_timeout = _parse_positive_float(
+            "--upload-timeout", args.upload_timeout
         )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
     log_path = args.log_file or default_log_path()
     logger = OperationLogger(log_path)
-    logger.log(f"START patterns={patterns!r} dry_run={args.dry_run} brief={args.brief}")
-    for p in plan.skipped_mime:
-        logger.log(f"SKIP mime {p}")
-    for path, reason in plan.rejected_size:
-        logger.log(f"REJECT size {path}: {reason}")
-
-    eligible = [item for batch in plan.batches for item in batch]
-    total_files = len(eligible)
-    total_bytes = sum(item.size for item in eligible)
-
     logger.log(
-        f"PLAN files={total_files} bytes={total_bytes} batches={len(plan.batches)}"
+        f"START paths_list={len(paths_list)} globs={globs!r} "
+        f"dry_run={args.dry_run} brief={args.brief} "
+        f"upload_timeout={upload_timeout}"
     )
 
-    if args.dry_run:
-        print(f"dry-run: {total_files} file(s), {total_bytes} byte(s), "
-              f"{len(plan.batches)} batch(es)")
-        for i, batch in enumerate(plan.batches, 1):
-            batch_bytes = sum(x.size for x in batch)
-            print(f"  batch {i}: {len(batch)} file(s), {batch_bytes} byte(s)")
-            for item in batch:
-                print(f"    {item.path} ({item.size} bytes, {item.mime})")
-        print(f"log file: {log_path}")
-        logger.log("END dry-run")
-        logger.close()
-        return 0
-
     host = args.host.strip()
-    if "://" not in host:
-        base = f"http://{host}"
-    else:
-        base = host
+    base = host if "://" in host else f"http://{host}"
     api_url = urllib.parse.urljoin(base.rstrip("/") + "/", "api/upload")
 
     metadata = {
@@ -679,54 +1191,49 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "tags": args.tags,
     }
 
-    processed_files = 0
-    processed_bytes = 0
-    success_count = 0
-    fail_count = 0
-    uploaded_bytes = 0
+    interrupt = threading.Event()
+    interrupted = False
 
-    for batch_idx, batch in enumerate(plan.batches, 1):
-        logger.log(f"BATCH {batch_idx} size={len(batch)}")
-        if not args.brief:
-            print(
-                f"Uploading batch {batch_idx}/{len(plan.batches)} "
-                f"({len(batch)} file(s))…",
-                file=sys.stderr,
-            )
-        outcomes = upload_batch(api_url, batch, metadata)
-        for outcome in outcomes:
-            item = outcome.item
-            processed_files += 1
-            processed_bytes += item.size
-            progress = _progress_line(
-                processed_files, total_files, processed_bytes, total_bytes
-            )
-            if outcome.ok:
-                success_count += 1
-                uploaded_bytes += item.size
-                logger.log(f"OK {item.path}")
-                if not args.brief:
-                    print(f"{item.path}{progress}")
-            else:
-                fail_count += 1
-                logger.log(f"FAIL {item.path}: {outcome.message}")
-                if not args.brief:
-                    print(
-                        f"FAIL {item.path}{progress}: {outcome.message}",
-                        file=sys.stderr,
-                    )
+    def on_sigint(signum, frame) -> None:
+        nonlocal interrupted
+        interrupted = True
+        interrupt.set()
+        print(
+            "\nInterrupt received; finishing current upload if any…",
+            file=sys.stderr,
+        )
+
+    signal.signal(signal.SIGINT, on_sigint)
+
+    stats = run_upload_pipeline(
+        paths_list=paths_list,
+        globs=globs,
+        limits=limits,
+        ignore_rules=ignore_rules,
+        logger=logger,
+        api_url=api_url,
+        metadata=metadata,
+        dry_run=args.dry_run,
+        brief=args.brief,
+        interrupt=interrupt,
+        upload_timeout=upload_timeout,
+    )
 
     print(
-        f"done: uploaded={success_count} failed={fail_count} "
-        f"bytes_uploaded={uploaded_bytes} total_eligible_files={total_files} "
-        f"total_eligible_bytes={total_bytes}"
+        f"done: uploaded={stats['success']} failed={stats['fail']} "
+        f"bytes_uploaded={stats['bytes']} files_processed={stats['processed']}"
     )
     print(f"log file: {log_path}")
+    print(_restart_hint(log_path))
     logger.log(
-        f"END uploaded={success_count} failed={fail_count} bytes={uploaded_bytes}"
+        f"END uploaded={stats['success']} failed={stats['fail']} "
+        f"bytes={stats['bytes']} interrupted={interrupted}"
     )
     logger.close()
-    return 0 if fail_count == 0 else 1
+
+    if interrupted:
+        return 130
+    return 0 if stats["fail"] == 0 else 1
 
 
 if __name__ == "__main__":
