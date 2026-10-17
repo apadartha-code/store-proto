@@ -32,12 +32,12 @@ def test_get_download_by_url(client, app):
     assert res.data == data
 
 
-def test_post_download_by_url(client, app):
-    image_id, data = _ingest()
+def test_post_download_by_url_not_allowed(client, app):
+    # Features.md §8 — POST /api/image is not supported
+    image_id, _data = _ingest()
     url = f"http://localhost/i/{image_id}"
     res = client.post("/api/image", json={"url": url})
-    assert res.status_code == 200
-    assert res.data == data
+    assert res.status_code == 405
 
 
 def test_get_download_by_otp(client, app):

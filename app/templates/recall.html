@@ -12,9 +12,7 @@
 
   <form method="post" action="{{ url_for('web.recall_find') }}">
     <input type="hidden" name="recall_mode" value="{{ recall_mode }}">
-    {% if recall_mode == 'callback' %}
-    <input type="hidden" name="callback" value="{{ callback }}">
-    {% else %}
+    {% if recall_mode == 'redir' %}
     <input type="hidden" name="redir" value="{{ redir }}">
     <input type="hidden" name="idhash" value="{{ idhash }}">
     {% endif %}
@@ -31,12 +29,10 @@
   {% if matches %}
   <div class="recall-result">
     <h2>Matching images ({{ matches|length }})</h2>
-    <p class="hint">Select at least one image, then press Done.</p>
+    <p class="hint">Select at least one image, then press Done{% if recall_mode != 'redir' %} (returns to gallery){% endif %}.</p>
     <form method="post" action="{{ url_for('web.recall_done') }}" id="done-form">
       <input type="hidden" name="recall_mode" value="{{ recall_mode }}">
-      {% if recall_mode == 'callback' %}
-      <input type="hidden" name="callback" value="{{ callback }}">
-      {% else %}
+      {% if recall_mode == 'redir' %}
       <input type="hidden" name="redir" value="{{ redir }}">
       <input type="hidden" name="idhash" value="{{ idhash }}">
       {% endif %}
@@ -57,6 +53,7 @@
   </div>
   {% endif %}
 </section>
+{% if matches %}
 <script>
 const boxes = document.querySelectorAll('.recall-select');
 const doneBtn = document.getElementById('recall-done');
@@ -68,4 +65,5 @@ function syncDone() {
 boxes.forEach((b) => b.addEventListener('change', syncDone));
 syncDone();
 </script>
+{% endif %}
 {% endblock %}

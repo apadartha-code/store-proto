@@ -98,6 +98,6 @@ STORAGE_PATH=/tmp/img-test .venv/bin/python -c "from app import create_app; crea
 
 ## Integration
 
-External apps download images via `/api/image` and optional `/recall` flows (callback or redirect + OTP). Sample clients under `sample-clients/`.
+External apps use `GET /api/image` (URL or OTP), `GET /i/<uuid>/content` for direct downloads, and `/recall` with `redir` + OTP when needed. Sample clients under `sample-clients/`.
 
 Full API, recall, OTP, and sample client steps: [Features.md §7–§11](Features.md#7-nickname-recall-recall).

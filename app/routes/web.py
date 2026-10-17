@@ -27,48 +27,28 @@ web_bp = Blueprint("web", __name__)
 
 
 def _recall_context_from_request() -> dict:
-    callback = request.args.get("callback")
+    if request.args.get("callback"):
+        return {"recall_error": "callback query parameter is not supported"}
     redir = request.args.get("redir")
     idhash = request.args.get("idhash")
-
-    if callback:
-        return {
-            "recall_mode": "callback",
-            "callback": callback,
-            "redir": None,
-            "idhash": None,
-        }
     if redir:
         return {
             "recall_mode": "redir",
-            "callback": None,
             "redir": redir,
             "idhash": idhash,
         }
-    return {
-        "recall_mode": "callback",
-        "callback": url_for("web.landing", _external=True),
-        "redir": None,
-        "idhash": None,
-    }
+    return {"recall_mode": "browse", "redir": None, "idhash": None}
 
 
 def _recall_context_from_form() -> dict:
-    mode = request.form.get("recall_mode", "callback")
+    mode = request.form.get("recall_mode", "browse")
     if mode == "redir":
         return {
             "recall_mode": "redir",
-            "callback": None,
             "redir": request.form.get("redir"),
             "idhash": request.form.get("idhash"),
         }
-    callback = request.form.get("callback") or url_for("web.landing", _external=True)
-    return {
-        "recall_mode": "callback",
-        "callback": callback,
-        "redir": None,
-        "idhash": None,
-    }
+    return {"recall_mode": "browse", "redir": None, "idhash": None}
 
 
 def _append_query(url: str, params: dict[str, str]) -> str:
@@ -178,6 +158,14 @@ def serve_thumbnail(image_id: str):
 @web_bp.get("/recall")
 def recall():
     ctx = _recall_context_from_request()
+    if ctx.get("recall_error"):
+        return render_template(
+            "recall.html",
+            recall_mode="browse",
+            redir=None,
+            idhash=None,
+            error=ctx["recall_error"],
+        ), 400
     if ctx["recall_mode"] == "redir" and not ctx["idhash"]:
         return render_template(
             "recall.html",
@@ -227,19 +215,9 @@ def recall_done():
     if not image_urls:
         abort(400)
 
-    if ctx["recall_mode"] == "redir":
-        redir = ctx.get("redir")
-        idhash = ctx.get("idhash")
-        if not redir or not idhash:
-            abort(400)
-        otp = create_otp(image_urls[0], idhash)
-        return redirect(_append_query(redir, {"otp": otp}))
-
-    callback = ctx.get("callback")
-    if not callback:
-        abort(400)
-    return render_template(
-        "recall_done.html",
-        callback=callback,
-        image_urls=image_urls,
-    )
+    redir = (ctx.get("redir") or "").strip() or url_for("web.landing")
+    idhash = (ctx.get("idhash") or "").strip()
+    if ctx["recall_mode"] != "redir" or not idhash:
+        return redirect(redir)
+    otp = create_otp(image_urls[0], idhash)
+    return redirect(_append_query(redir, {"otp": otp}))

@@ -141,13 +141,9 @@ SHA-256 hex of padded chunk content, size in KB, image FK, index order. Public f
 - Link **Setup nicknames for recalling image** opens `/` in a **new tab**.
 - If **multiple** images match, each row has a checkbox; **Done** stays **disabled** until at least one image is selected.
 
-### Done — callback mode
+### Browse (no integration query params)
 
-Query: `callback=<url-encoded endpoint>` (if omitted, default callback is the gallery landing URL).
-
-If **`callback` is present**, **`redir` is ignored** (even if also on the query string).
-
-After selection, POST to callback with one `image_url` hidden field per selected image (absolute `/i/<uuid>` URLs). Auto-submit via `recall_done.html`.
+Find nicknames, select matches, and press **Done** to return to the gallery (`/`). **Full** links open bytes at `/i/<uuid>/content`.
 
 ### Done — redirect + OTP mode
 
@@ -167,7 +163,7 @@ Does **not** expose raw bytes via a public `GET` by UUID alone on a dedicated ID
 
 | Mode | Request |
 |------|---------|
-| By URL | `GET ?url=<image page URL>` or `POST` JSON `{ "url": "..." }` (`image_url` alias) |
+| By URL | `GET ?url=<image page URL>` (`image_url` query alias) |
 | By OTP (GET only) | `?otp=...&id=<base64 id bytes>` — validates idhash, returns bytes for stored image URL; **OTP always consumed** (success or failure) |
 
 Errors: JSON `{ "error": "..." }` with non-2xx status.
@@ -201,13 +197,17 @@ Default list `sharing` when omitted: `public_and_shared`.
 
 ## 11. External integration
 
-### Callback recall
+### Direct image bytes (curl / wget)
+
+When the image store is reachable on your LAN (or you trust the host), raw bytes are available at:
 
 ```
-/recall?callback=<url-encoded endpoint>
+GET /i/<uuid>/content
 ```
 
-POST body: one or more `image_url=<absolute /i/... URL>` fields.
+Example: `curl -o photo.jpg 'http://<host>/i/<uuid>/content'` or the same URL with `wget -O photo.jpg`.
+
+This route is intended for simple scripts and tools; it is separate from `/api/image` (OTP / image-page URL validation).
 
 ### Redirect + OTP recall
 
@@ -221,9 +221,7 @@ Then `GET /api/image?otp=...&id=<base64(id_bytes)>`.
 
 | Path | Mechanism |
 |------|-----------|
-| `sample-clients/cli-downloader/` | CLI → `POST /api/image` |
 | `sample-clients/batch-uploader/` | CLI batch `POST /api/upload` (glob patterns, limits from `.env`) |
-| `sample-clients/app-callback/` | Recall `callback` (port 4999) |
 | `sample-clients/app-redirect/` | Recall `redir` + OTP (port 4998) |
 
 **Batch uploader** (`upload_batch.py`): stdlib-only. Inputs: `-F`/`--paths-list` (one image path per line, or `-` for stdin) and/or `-g`/`--glob` (directory scan; globs converted to regex and walked with `os.walk`). With both, `-F` paths are processed first and excluded from `-g` scan. No folder scan without `-g`. `-I`/`--ignore-file` lists paths or directories to skip (directories prune scan). Producer/consumer threads enqueue eligible files (size/mime/ignore filtered) and upload in batches (consumer starts after `10 × MAX_UPLOAD_FILE_COUNT` queued items or when scanning finishes). Logs `LIST`, `ENQUEUE`, `SCAN_DIR_COMPLETE`, `OK`/`FAIL` for restart via `-F`/`-I`. Requires `--sharing` and `--license` (valid keys in `enums.yml`); `--source` when public. Limits from `./.env`, environment, then `--env-file`. Flags: `--dry-run`, `--brief`, `--host` (default `127.0.0.1:5000`), `--upload-timeout` (seconds per batch HTTP call, default `30`). Ctrl+C stops the producer scan immediately and finishes the consumer’s in-flight upload, then exits with restart hints. Manual checks: [sample-clients/batch-uploader/MANUAL_TEST_CHECKLIST.md](sample-clients/batch-uploader/MANUAL_TEST_CHECKLIST.md). Run with `-h` for full help.

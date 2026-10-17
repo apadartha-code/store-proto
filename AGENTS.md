@@ -61,11 +61,11 @@ Docker: `docker build -t image-store .` then run with `-v` on `/data`.
 ## Architecture constraints (do not break without explicit ask)
 
 1. **Sharing** is set at upload time and must not become editable later in UI/API.
-2. **Raw image bytes** are not served by UUID on a public GET API. Downloads use **`GET|POST /api/image`** with an **image page URL** (`/i/<uuid>`) or **`otp` + `id`** (GET only).
+2. **Raw image bytes** for integrations: **`GET /api/image`** with an **image page URL** (`/i/<uuid>`) or **`otp` + `id`**; also **`GET /i/<uuid>/content`** for direct curl/wget (see Features.md §11).
 3. **Fragments**: padded chunks, SHA-256 filenames; `public` vs `user` folders per spec in `app/services/fragments.py`.
 4. **Nicknames**: 24-bit hash in `nicknames` table; random on upload, user label sets first 24 bits of SHA-256; collisions allowed (`app/services/nickname.py`).
 5. **Categories/licenses**: from `enums.yml`; multi-category via `image_categories`; single `license_id` on `images`.
-6. **Recall**: `callback` (POST `image_url`) **or** `redir` + `idhash` (redirect with OTP). If both query params are present, **callback wins**. Multi-image nickname matches require checkbox selection before Done. OTP store: in-memory, 10s TTL, `app/services/otp.py`.
+6. **Recall**: `redir` + `idhash` (redirect with OTP) for external handoff; bare `/recall` is browse-only. Multi-image nickname matches require checkbox selection before Done in redir mode. OTP store: in-memory, 10s TTL, `app/services/otp.py`.
 7. **Backup**: `POST /api/backup` uses SQLite backup under write lock; thumbnail worker may trigger localhost backup after thumbnails.
 
 ## Configuration
@@ -98,9 +98,7 @@ Independent Flask/CLI apps under `sample-clients/`—change them without couplin
 
 | Folder | Role |
 |--------|------|
-| `cli-downloader/` | Stdlib CLI → `POST /api/image` |
 | `batch-uploader/` | Stdlib CLI batch upload → `POST /api/upload` |
-| `app-callback/` | Recall with `callback` (port 4999) |
 | `app-redirect/` | Recall with `redir` + OTP (port 4998) |
 
 ## Common tasks

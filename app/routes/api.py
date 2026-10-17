@@ -29,21 +29,11 @@ logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__)
 
 
-@api_bp.route("/image", methods=["GET", "POST"])
+@api_bp.get("/image")
 def download_image():
-    url = None
-    otp = None
-    id_b64 = None
-
-    if request.method == "GET":
-        url = request.args.get("url") or request.args.get("image_url")
-        otp = request.args.get("otp")
-        id_b64 = request.args.get("id")
-    else:
-        data = request.get_json(silent=True) or {}
-        url = data.get("url") or data.get("image_url")
-        otp = data.get("otp")
-        id_b64 = data.get("id")
+    url = request.args.get("url") or request.args.get("image_url")
+    otp = request.args.get("otp")
+    id_b64 = request.args.get("id")
 
     resolved_url, err = resolve_download_url(url=url, otp=otp, id_b64=id_b64)
     if err:

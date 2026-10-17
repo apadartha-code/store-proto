@@ -15,7 +15,7 @@
 </head>
 <body>
   <h1>Recall redirect + OTP demo</h1>
-  <p class="hint">Runs on port {{ port }}. Uses <code>redir</code> + <code>idhash</code> instead of POST callback.</p>
+  <p class="hint">Runs on port {{ port }}. Uses <code>redir</code> + <code>idhash</code> recall handoff and <code>GET /api/image</code> with OTP.</p>
 
   {% if error %}
   <p class="error">{{ error }}</p>
