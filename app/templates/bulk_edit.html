@@ -41,8 +41,7 @@
 <script>
 (function () {
   const sel = window.ImageStoreGallerySelection;
-  let state = sel.ensureContext(sel.loadState());
-  sel.saveState(state);
+  const state = sel.loadStateForBulkEdit();
   const ids = sel.getSelectedIds(state);
   if (!ids.length) {
     window.location.replace('/');
@@ -53,6 +52,9 @@
   const thumbsEl = document.getElementById('bulk-edit-thumbs');
   const submitBtn = document.getElementById('bulk-submit');
   const cancelLink = document.getElementById('bulk-cancel');
+  if (state.contextKey) {
+    cancelLink.href = sel.galleryUrlFromStoredContext(state.contextKey);
+  }
 
   function checkedIds() {
     return Array.from(thumbsEl.querySelectorAll('.bulk-thumb-cb:checked')).map((cb) => cb.value);

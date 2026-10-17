@@ -87,6 +87,9 @@ def test_bulk_edit_page_renders(client):
     assert b"bulk-edit" in res.data
     assert b'data-testid="bulk-submit"' in res.data
     assert b'data-testid="category-cb-General"' in res.data
+    # Features.md §4 — bulk edit must not re-run gallery context check (clears search selections)
+    assert b"loadStateForBulkEdit" in res.data
+    assert b"ensureContext(sel.loadState())" not in res.data
 
 
 def test_landing_has_selection_controls(client, app):

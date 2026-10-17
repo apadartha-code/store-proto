@@ -75,6 +75,27 @@
     global.sessionStorage.removeItem(STORAGE_KEY);
   }
 
+  /** Bulk edit URL has no gallery query string; do not clear stored selection. */
+  function loadStateForBulkEdit() {
+    return loadState();
+  }
+
+  function galleryUrlFromStoredContext(contextKey) {
+    try {
+      const ctx = JSON.parse(contextKey);
+      const params = new URLSearchParams();
+      params.set('page', '1');
+      if (ctx.category) params.set('category', ctx.category);
+      if (ctx.sharing) params.set('sharing', ctx.sharing);
+      if (ctx.q) params.set('q', ctx.q);
+      if (ctx.random === '1') params.set('random', '1');
+      const qs = params.toString();
+      return qs ? `/?${qs}` : '/';
+    } catch {
+      return '/';
+    }
+  }
+
   function syncToolbar(state) {
     const count = getSelectedIds(state).length;
     const wrap = document.getElementById('selection-count-wrap');
@@ -155,6 +176,8 @@
     ensureContext,
     getSelectedIds,
     clearSelectionStorage,
+    loadStateForBulkEdit,
+    galleryUrlFromStoredContext,
     initGallerySelection,
   };
 })(window);
