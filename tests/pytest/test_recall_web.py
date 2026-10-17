@@ -60,3 +60,4 @@ def test_recall_setup_link_new_tab(client):
     assert res.status_code == 200
     assert b"Setup nicknames" in res.data
     assert b'target="_blank"' in res.data
+    assert b'name="nickname"' in res.data and b'autocomplete="off"' in res.data

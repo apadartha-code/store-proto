@@ -36,7 +36,7 @@
         <input type="text" name="tags" value="{{ image.tags | join(', ') }}">
       </label>
       <label>Set nickname (SHA-256 first 24 bits as 6-char hex)
-        <input type="text" name="nickname" placeholder="optional new nickname">
+        <input type="text" name="nickname" placeholder="optional new nickname" autocomplete="off">
       </label>
       <button type="submit" data-testid="detail-save">Save</button>
     </form>

@@ -17,7 +17,7 @@
     <input type="hidden" name="idhash" value="{{ idhash }}">
     {% endif %}
     <label>Nickname (text or 6-char hex; nearest hash if no exact match)
-      <input type="text" name="nickname" value="{{ nickname or '' }}" required>
+      <input type="text" name="nickname" value="{{ nickname or '' }}" required autocomplete="off">
     </label>
     <button type="submit" data-testid="recall-find">Find matching images</button>
   </form>
