@@ -29,3 +29,4 @@ def test_detail_page_has_save_acknowledgement_overlays(client, app):
     assert b'data-testid="detail-overlay-failure-dismiss"' in res.data
     assert b'data-testid="category-cb-General"' in res.data
     assert b'name="nickname"' in res.data and b'autocomplete="off"' in res.data
+    assert b"Nickname hashes" not in res.data

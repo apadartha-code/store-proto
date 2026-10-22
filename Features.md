@@ -129,8 +129,8 @@ SHA-256 hex of padded chunk content, size in KB, image FK, index order. Public f
 
 ## 6. Nicknames
 
-- **On upload**: random 24-bit hash stored; shown as **6 lowercase hex digits** where displayed.
-- **User-assigned nickname**: replaces prior nickname rows for that image; hash = first 24 bits of SHA-256 of UTF-8 input (same 6-hex display). Collisions across images are allowed.
+- **On upload**: random 24-bit hash stored (not shown in the UI).
+- **User-assigned nickname**: replaces prior nickname rows for that image; hash = first 24 bits of SHA-256 of UTF-8 input. Collisions across images are allowed. Nickname hashes are **not displayed** in the web UI or `GET /api/images/<id>` JSON.
 - **Recall / API lookup**: user may enter nickname text or a **6-character hex hash**. Lookup uses the 24-bit hash (SHA-256 prefix for text). If no image has that exact hash, the **nearest** stored hash is used: the largest hash ≤ target, or the maximum hash in the database if target is below all stored values (same ordering rule as Phase 1 MD5 nicknames). All images sharing the matched or nearest hash are returned.
 
 ---
@@ -178,7 +178,7 @@ Image page URL form: `http://<host>/i/<uuid>`.
 |--------|------|---------|
 | POST | `/api/upload` | Multipart `files` + metadata (`sharing`, `categories`, `license`, `source`, `tags`) |
 | GET | `/api/images` | List/search (`page`, `category`, `sharing`, `q`, `tag`); `random=1` returns a random page when `q` is omitted (`q` wins if both are sent) |
-| GET | `/api/images/<id>` | Metadata, `categories`, license key, `nickname_hashes` (6-hex), `image_url` |
+| GET | `/api/images/<id>` | Metadata, `categories`, license key, `image_url` |
 | PATCH | `/api/images/<id>` | `tags`, `categories`, `license`, `nickname` (not sharing) |
 | POST | `/api/backup` | SQLite backup to `store.backup.db` |
 | GET | `/api/nicknames/nearest?q=` | Nickname or 6-hex lookup with **nearest-hash** fallback; JSON `{ "items": [...], "count" }` or 404 |

@@ -15,11 +15,7 @@ import urllib.parse
 from app.config import Config
 from app.services.otp import create_otp
 from app.services.fragments import reconstruct_image
-from app.services.nickname import (
-    find_images_by_nickname,
-    hash_to_display,
-    list_nickname_hashes_for_image,
-)
+from app.services.nickname import find_images_by_nickname
 from app.services.query import get_image, list_images
 from app.services.thumbnail import thumbnail_path
 
@@ -111,13 +107,9 @@ def image_detail(image_id: str):
     img = get_image(image_id)
     if not img:
         abort(404)
-    nickname_hashes = [
-        hash_to_display(h) for h in list_nickname_hashes_for_image(image_id)
-    ]
     return render_template(
         "detail.html",
         image=img,
-        nickname_hashes=nickname_hashes,
         image_page_url=url_for("web.image_page", image_id=image_id, _external=True),
     )
 

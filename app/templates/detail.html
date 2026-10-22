@@ -16,7 +16,6 @@
       <dt>Source</dt><dd>{{ image.source or '—' }}</dd>
       <dt>License</dt><dd>{{ image.license or '—' }}</dd>
       <dt>Tags</dt><dd>{{ image.tags | join(', ') if image.tags else '—' }}</dd>
-      <dt>Nickname hashes</dt><dd>{% for n in nickname_hashes %}<code>{{ n }}</code> {% else %}—{% endfor %}</dd>
       <dt>Image URL</dt><dd><a href="{{ image_page_url }}">{{ image_page_url }}</a></dd>
     </dl>
 
@@ -35,7 +34,7 @@
       <label>Tags (comma-separated)
         <input type="text" name="tags" value="{{ image.tags | join(', ') }}">
       </label>
-      <label>Set nickname (SHA-256 first 24 bits as 6-char hex)
+      <label>Set nickname
         <input type="text" name="nickname" placeholder="optional new nickname" autocomplete="off">
       </label>
       <button type="submit" data-testid="detail-save">Save</button>

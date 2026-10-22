@@ -11,8 +11,6 @@ from app.services.errors import UploadValidationError
 from app.services.image_download import resolve_download_url, send_image_download
 from app.services.nickname import (
     find_images_by_nickname,
-    hash_to_display,
-    list_nickname_hashes_for_image,
     set_user_nickname,
 )
 from app.services.query import get_image, list_images, random_images
@@ -138,8 +136,6 @@ def api_get_image(image_id: str):
     img = get_image(image_id)
     if not img:
         return jsonify({"error": "Not found"}), 404
-    hashes = list_nickname_hashes_for_image(image_id)
-    img["nickname_hashes"] = [hash_to_display(h) for h in hashes]
     img["image_url"] = request.host_url.rstrip("/") + f"/i/{image_id}"
     return jsonify(img)
 
