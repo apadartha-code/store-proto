@@ -74,12 +74,15 @@
       <p class="hint">Filters apply to latest, search, and random views for this browser session.</p>
       <div class="settings-fields">
         <label>Category
-          <select id="settings-category">
-            <option value="general" {% if category == 'general' %}selected{% endif %}>General</option>
-            <option value="adult" {% if category == 'adult' %}selected{% endif %}>Adult</option>
-            <option value="violent" {% if category == 'violent' %}selected{% endif %}>Violent</option>
-            <option value="grotesque" {% if category == 'grotesque' %}selected{% endif %}>Grotesque</option>
-            <option value="all" {% if category == 'all' %}selected{% endif %}>All</option>
+          <select id="settings-category" data-testid="settings-category">
+            {% for key, cat in all_categories %}
+            <option
+              value="{{ key|lower }}"
+              data-testid="settings-category-option-{{ key }}"
+              {% if category == key|lower %}selected{% endif %}
+            >{{ key }}</option>
+            {% endfor %}
+            <option value="all" data-testid="settings-category-option-All" {% if category == 'all' %}selected{% endif %}>All</option>
           </select>
         </label>
         <label>Sharing

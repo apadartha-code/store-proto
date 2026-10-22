@@ -52,6 +52,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Local Playwright tests (not in CI until further notice)
+tests/playwright/
+
 # Translations
 *.mo
 *.pot
