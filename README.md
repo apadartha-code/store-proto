@@ -90,6 +90,20 @@ pytest
 
 Tests live in `tests/pytest/` and reference sections in [Features.md](Features.md). UI click targets use `data-testid` attributes for automation.
 
+Playwright UI tests live in `tests/playwright/`. `conftest.py` starts Flask on `127.0.0.1:5000` with a fresh temp database (no manual `python run.py`). Fixture images for uploads are under `tests/data/images/set-01/`. Use a numeric prefix on filenames (e.g. `test_001-fresh_install.py`) so later pipeline tests run in order when you pass a directory to pytest. Install browsers once, then run headless:
+
+```bash
+playwright install chromium
+pytest tests/pytest -q
+pytest tests/playwright/ --browser chromium
+```
+
+To run only the fresh-install pipeline:
+
+```bash
+pytest tests/playwright/test_001-fresh_install.py --browser chromium
+```
+
 Quick smoke test without pytest:
 
 ```bash
